@@ -1,0 +1,18 @@
+
+version: "3.8"
+services:
+  music-tag-filler-nas:
+    image: music-tag-filler-nas:latest
+    build:
+      context: /volume3/docker3/music-tag-filler-nas
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - /volume1/Multimedia/Music:/music:rw
+      - /volume3/docker3/music-tag-filler-nas/data:/data:rw
+    environment:
+      - MUSIC_ROOT=/music
+      - DATA_ROOT=/data
+      - TZ=Asia/Seoul
+    restart: unless-stopped

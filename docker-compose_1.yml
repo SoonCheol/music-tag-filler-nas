@@ -1,0 +1,35 @@
+
+version: "3.8"
+
+services:
+  music-tag-filler-nas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: music-tag-filler-nas
+    ports:
+      - "8000:8000"
+    volumes:
+      # 🎵 실제 음악 폴더 - 읽기쓰기 필수
+      - /volume1/Multimedia/Music:/music:rw
+      # 💾 작업 상태, 백업, .tagbak.json 기록 보관
+      - /volume3/docker3/music-tag-filler-nas/data:/data:rw
+    environment:
+      - MUSIC_ROOT=/music
+      - DATA_ROOT=/data
+      - TZ=Asia/Seoul
+    restart: unless-stopped
+    # Ugreen DXP4800+는 x86_64, 메모리 넉넉 — fpcalc 위해 리소스 약간
+    mem_limit: 2g
+
+# --- 이미 검증된 대안: music-tag-web (바로 쓸 수 있음) ---
+#  필요하면 아래 서비스 주석 해제해서 8002 포트로 함께 띄우기
+#  music-tag-web:
+#    image: xhongc/music_tag_web:latest
+#    container_name: music-tag-web
+#    ports:
+#      - "8002:8002"
+#    volumes:
+#      - /volume1/Multimedia/Music:/app/media:rw
+#      - /volume3/docker3/music-tag-web/data:/app/data:rw
+#    restart: unless-stopped

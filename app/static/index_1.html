@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>음악 정보 채우기 - NAS</title>
+<style>
+:root{--bg:#f2f3f5;--card:#fff;--line:#d0d3d8;--line2:#e6e8eb;--blue:#2b6de5;--blue-light:#e8f0fe;--text:#222;--muted:#6b7280}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:"Malgun Gothic","Apple SD Gothic Neo",dotum,sans-serif;color:var(--text);font-size:12px}
+.header{padding:10px 14px;background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.header h1{font-size:14px;margin:0}
+.header .sub{font-size:11px;color:var(--muted)}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.input{padding:5px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;background:#fff}
+.btn{padding:5px 10px;border-radius:4px;border:1px solid var(--line);cursor:pointer;font-size:12px;background:#f8f9fa;font-weight:600}
+.btn-blue{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn-red{background:#fff0f0;color:#c00;border-color:#f0c0c0}
+.btn-green{background:#f0faf0;color:#0a6;border-color:#b0e0b0}
+.btn:disabled{opacity:.5}
+.main{max-width:1400px;margin:0 auto;padding:10px;display:grid;grid-template-columns:440px 1fr;gap:10px;align-items:start}
+@media(max-width:900px){.main{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.panel-head{padding:7px 10px;background:#f6f7f8;border-bottom:1px solid var(--line);font-weight:700;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+.table-wrap{overflow:auto;max-height:560px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:6px 8px;text-align:left;background:#f6f7f8;border-bottom:1px solid var(--line);font-weight:700;white-space:nowrap;position:sticky;top:0;z-index:1}
+td{padding:5px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+tr:hover{background:#f5f7ff}
+tr.selected{background:var(--blue-light) !important}
+.badge{font-size:10px;padding:1px 5px;border-radius:3px;background:#eef;color:#334}
+.badge-warn{background:#fff3cd;color:#856404}
+.badge-ok{background:#d4edda;color:#155724}
+.right-wrap{display:flex;flex-direction:column;gap:10px}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);background:#f6f7f8}
+.tab{padding:7px 14px;font-size:12px;cursor:pointer;border:1px solid transparent;border-bottom:none;margin-bottom:-1px}
+.tab.active{background:#fff;border-color:var(--line);border-radius:4px 4px 0 0;font-weight:700}
+.tag-box{padding:10px;border:1px solid var(--line);border-radius:0 0 6px 6px;background:#fff}
+.tag-section{border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:10px}
+.tag-section h4{margin:0 0 8px 0;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+.tag-grid{display:grid;grid-template-columns:90px 1fr 24px;gap:6px 8px;align-items:center}
+.tag-grid.no-check{grid-template-columns:90px 1fr}
+.cover{width:110px;height:110px;border:1px solid var(--line);background:#f8f8f8;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:11px;overflow:hidden}
+.cover img{width:100%;height:100%;object-fit:cover}
+.progress{height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+.progress div{height:100%;background:var(--blue);transition:width .2s}
+.jobs{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;padding:8px}
+.job{border:1px solid var(--line2);border-radius:4px;padding:6px;background:#fff;font-size:11px}
+.cand-table{max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:4px;margin-top:8px}
+.status-line{padding:6px 10px;font-size:11px;color:var(--muted);background:#fafafa;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>음악 정보 채우기</h1>
+    <div class="sub">네가 올린 이미지 레이아웃 1:1 복제 — 중지/중복방지/이어하기 포함</div>
+  </div>
+  <div class="controls">
+    <input id="subPath" class="input" style="width:200px" placeholder="예: Ballad/ 또는 전체">
+    <label style="font-size:11px"><input type="checkbox" id="onlyEmpty" checked> 빈칸만</label>
+    <label style="font-size:11px"><input type="checkbox" id="fillLyrics"> 가사</label>
+    <button id="btnScan" class="btn btn-blue" onclick="startScan()">스캔 시작</button>
+    <button id="btnStop" class="btn btn-red" style="display:none" onclick="stopScan()">중지</button>
+    <button id="btnResume" class="btn btn-green" style="display:none" onclick="resumeScan()">이어하기</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="panel">
+    <div class="panel-head">
+      <span>파일 목록 <span id="fileCount" class="badge">0</span></span>
+      <span style="display:flex;gap:4px"><input id="fileFilter" class="input" style="width:120px;padding:3px 6px" placeholder="필터"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="toggleSelectAll()">전체선택</button></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th>파일명</th><th style="width:70px">상태</th></tr></thead>
+        <tbody id="fileBody"><tr><td colspan="4" style="text-align:center;padding:30px;color:#999">스캔을 시작하세요</td></tr></tbody>
+      </table>
+    </div>
+    <div class="status-line">
+      <span id="selectedInfo">선택: 0곡</span>
+      <span id="progressText"></span>
+    </div>
+    <div style="padding:6px"><div class="progress"><div id="progBar" style="width:0%"></div></div></div>
+    <div class="panel-head">백그라운드 작업</div>
+    <div id="jobs" class="jobs"><div style="text-align:center;color:#999;padding:8px">작업 없음</div></div>
+  </div>
+
+  <div class="right-wrap">
+    <div class="panel">
+      <div class="tabs">
+        <div class="tab active">자동태그</div>
+        <div class="tab">태그 일괄수정</div>
+      </div>
+      <div class="tag-box">
+        <div class="tag-section">
+          <h4>현재 태그 정보</h4>
+          <div style="display:flex;gap:12px">
+            <div class="cover" id="currentCover"><span>no image</span></div>
+            <div style="flex:1" class="tag-grid no-check">
+              <div>제목 :</div><div id="cur_title"></div>
+              <div>가수 :</div><div id="cur_artist"></div>
+              <div>앨범 :</div><div id="cur_album"></div>
+              <div>트랙 :</div><div id="cur_track"></div>
+              <div>년도 :</div><div id="cur_year"></div>
+              <div>장르 :</div><div id="cur_genre"></div>
+            </div>
+          </div>
+        </div>
+        <div class="tag-section">
+          <h4><label><input type="checkbox" id="checkAllChange" checked onchange="toggleAllChange(this.checked)"> 변경할 태그 정보</label> <span style="font-weight:400;color:#666;font-size:11px">— 체크된 항목만 저장</span></h4>
+          <div style="display:flex;gap:12px">
+            <div class="cover" id="changeCover"><span>no image</span></div>
+            <div style="flex:1" class="tag-grid">
+              <div>제목 :</div><input id="chg_title" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="title" checked></label>
+              <div>가수 :</div><input id="chg_artist" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="artist" checked></label>
+              <div>앨범 :</div><input id="chg_album" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="album" checked></label>
+              <div>트랙 :</div><input id="chg_track" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="track" checked></label>
+              <div>년도 :</div><input id="chg_year" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="year" checked></label>
+              <div>장르 :</div><input id="chg_genre" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="genre" checked></label>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="btn btn-blue" onclick="applySelectedCandidate()">선택 적용</button>
+            <button class="btn" onclick="saveCurrent()">저장</button>
+            <button class="btn" onclick="saveAll()">전체 저장</button>
+            <button class="btn" onclick="resetChange()">되돌리기</button>
+            <span style="margin-left:auto;font-size:11px">가사: <span id="lyricStatus" class="badge">없음</span></span>
+          </div>
+        </div>
+        <div style="margin-top:6px">
+          <div style="font-size:11px;font-weight:700;margin-bottom:4px;display:flex;justify-content:space-between"><span>검색 후보 (클릭하면 변경할 태그에 적용)</span><span><input id="searchQ" class="input" style="width:140px;padding:2px 6px" placeholder="재검색"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="manualSearch()">검색</button></span></div>
+          <div class="cand-table">
+            <table>
+              <thead><tr><th>제목</th><th>가수</th><th>앨범</th><th>년도</th><th>출처</th><th>일치도</th></tr></thead>
+              <tbody id="candBody"><tr><td colspan="6" style="text-align:center;padding:12px;color:#999">파일을 선택하면 후보가 표시됩니다</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="status-line"><span id="statusLine">대기 중</span><span>표지 미리보기는 후보에 마우스 올리면 확대</span></div>
+  </div>
+</div>
+<div id="hoverPrev" style="position:fixed;display:none;z-index:99;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.2)"><img style="width:240px;height:240px;object-fit:cover;border-radius:4px;display:block"></div>
+<script>
+let currentJobId=null,allJobs=[],currentResults=[],filteredResults=[],selectedFileIdx=-1;
+function $(id){return document.getElementById(id)}
+function api(p,o={}){return fetch(p,o).then(async r=>{const t=await r.text();let j;try{j=JSON.parse(t)}catch{j={raw:t}};if(!r.ok){const e=new Error(j.detail?.message||j.detail||t);e.status=r.status;e.detail=j.detail;throw e;}return j;});}
+function esc(s){return (s||'').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+async function startScan(force=false){
+  const sub=$('subPath').value.trim();
+  const payload={sub_path:sub,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:false,use_fingerprint:true,force};
+  try{$('btnScan').disabled=true;const res=await api('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentJobId=res.job_id;pollJobs();}catch(e){if(e.status===409&&e.detail){if(confirm((e.detail.message||'이미 스캔 중')+'\n중지하고 새로 시작할까요?')){try{await api('/api/jobs/'+e.detail.active_job_id+'/cancel',{method:'POST'});setTimeout(()=>startScan(true),800);}catch(err){alert(err.message)}}}else alert(e.message)}finally{$('btnScan').disabled=false}
+}
+async function stopScan(){if(!currentJobId) return; if(!confirm('중지할까요? 이어하기 가능')) return; await api('/api/jobs/'+currentJobId+'/cancel',{method:'POST'});}
+async function resumeScan(){if(!currentJobId) return; await api('/api/jobs/'+currentJobId+'/resume',{method:'POST'}); pollJobs();}
+async function pollJobs(){
+  try{
+    const jobs=await api('/api/jobs'); allJobs=jobs;
+    const box=$('jobs');
+    if(!jobs.length){box.innerHTML='<div style="text-align:center;color:#999;padding:8px">작업 없음</div>'}else{box.innerHTML='';jobs.slice(0,5).forEach(j=>{const pct=j.total?Math.round(j.scanned/j.total*100):0;const d=document.createElement('div');d.className='job';d.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span>${j.id}</span><span class="badge ${j.status==='done'?'badge-ok':j.status==='cancelled'?'badge-warn':''}">${j.status}</span></div><div>${j.sub_path||'전체'} — ${j.scanned}/${j.total} — ${j.current_file||''}</div><div class="progress" style="margin-top:4px"><div style="width:${pct}%"></div></div><div style="margin-top:4px;display:flex;gap:4px"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="loadJob('${j.id}')">보기</button>${j.status==='scanning'||j.status==='queued'?`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="api('/api/jobs/${j.id}/cancel',{method:'POST'})">중지</button>`:''}${j.status==='cancelled'||j.status==='interrupted'||j.status==='failed'?`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button>`:''}</div>`;box.appendChild(d);});}
+    let active=jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0];
+    if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=`${active.scanned}/${active.total||'?'} (${pct}%) ${active.status}`;$('statusLine').textContent=`${active.status} — ${active.current_file||''}`;if(active.status==='scanning'||active.status==='queued'){ $('btnStop').style.display='inline-block'; $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnStop').style.display='none'; $('btnResume').style.display='inline-block';}else{$('btnStop').style.display='none'; $('btnResume').style.display='none';}if(active.results&&active.results.length&&currentResults.length!==active.results.length){currentResults=active.results;applyFilter();}}
+  }catch(e){}
+  setTimeout(pollJobs, allJobs.some(j=>j.status==='scanning'||j.status==='queued')?1500:3000);
+}
+async function resumeSpecific(id){currentJobId=id;await resumeScan();}
+async function loadJob(id){const job=await api('/api/jobs/'+id);currentJobId=id;currentResults=job.results||[];applyFilter();}
+function applyFilter(){const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q));$('fileCount').textContent=filteredResults.length;renderFileList();if(selectedFileIdx>=filteredResults.length)selectedFileIdx=-1;if(selectedFileIdx===-1&&filteredResults.length)selectFile(0);}
+function renderFileList(){
+  const body=$('fileBody'); if(!filteredResults.length){body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return}
+  body.innerHTML=''; filteredResults.forEach((r,i)=>{const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';const status=r.best?'정보있음':'정보없음';const badge=r.best?'badge-ok':'badge-warn';tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="badge ${badge}">${status}</span></td>`;tr.onclick=()=>selectFile(i);body.appendChild(tr);});
+}
+function toggleCheck(i){filteredResults[i]._checked=!filteredResults[i]._checked;renderFileList();}
+function toggleSelectAll(checked){const val=typeof checked==='boolean'?checked:!filteredResults.every(r=>r._checked);filteredResults.forEach(r=>r._checked=val);$('checkAll').checked=val;renderFileList();}
+function selectFile(idx){
+  selectedFileIdx=idx; const r=filteredResults[idx]; renderFileList();
+  $('cur_title').textContent=r.original?.title||r.parsed?.title||''; $('cur_artist').textContent=r.original?.artist||r.parsed?.artist||''; $('cur_album').textContent=r.original?.album||''; $('cur_track').textContent=r.original?.tracknumber||''; $('cur_year').textContent=r.original?.date||''; $('cur_genre').textContent=r.original?.genre||'';
+  $('currentCover').innerHTML='<span>no image</span>';
+  const best=r.best||{}; $('chg_title').value=best.title||''; $('chg_artist').value=best.artist||''; $('chg_album').value=best.album||''; $('chg_track').value=best.track||''; $('chg_year').value=best.year||''; $('chg_genre').value=''; $('changeCover').innerHTML=best.cover_url?`<img src="${best.cover_url}" onerror="this.parentElement.innerHTML='<span>no image</span>'">`:'<span>no image</span>';
+  if(r.lyrics){$('lyricStatus').textContent=`있음 (${r.lyrics.split('\n').length}줄)`; $('lyricStatus').className='badge badge-ok';}else{$('lyricStatus').textContent='없음';}
+  renderCandidates(r);
+}
+function renderCandidates(r){
+  const body=$('candBody'); body.innerHTML=''; if(!r.candidates||!r.candidates.length){body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:12px;color:#999">후보 없음</td></tr>';return}
+  r.candidates.forEach((c,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${esc(c.title)}</td><td>${esc(c.artist)}</td><td>${esc(c.album)}</td><td>${esc(c.year)}</td><td>${esc(c.source)}</td><td>${c.score}</td>`;tr.onmouseenter=()=>{if(c.cover_url){const hp=$('hoverPrev');hp.style.display='block';hp.querySelector('img').src=c.cover_url;}};tr.onmousemove=(e)=>{const hp=$('hoverPrev');hp.style.left=(e.clientX+12)+'px';hp.style.top=(e.clientY+12)+'px';};tr.onmouseleave=()=>{$('hoverPrev').style.display='none';};tr.onclick=()=>{document.querySelectorAll('#candBody tr').forEach(el=>el.classList.remove('selected'));tr.classList.add('selected');$('chg_title').value=c.title||'';$('chg_artist').value=c.artist||'';$('chg_album').value=c.album||'';$('chg_year').value=c.year||'';$('chg_track').value=c.track||'';if(c.cover_url)$('changeCover').innerHTML=`<img src="${c.cover_url}">`;r.best=c;};body.appendChild(tr);});
+}
+function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);}
+async function saveCurrent(){if(selectedFileIdx<0) return alert('파일 선택');const r=filteredResults[selectedFileIdx];if(!confirm(r.path+' 저장?')) return;try{const res=await api(`/api/jobs/${currentJobId}/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify([r.path])});alert(`저장 완료: ${res.saved}`);}catch(e){alert(e.message)}}
+async function saveAll(){if(!currentJobId) return alert('작업 없음');const sel=filteredResults.filter(r=>r._checked).map(r=>r.path);const useAll=sel.length===0;if(!confirm(useAll?`전체 ${filteredResults.length}곡 저장?`:`선택 ${sel.length}곡 저장?`)) return;try{const res=await api(`/api/jobs/${currentJobId}/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(useAll?[]:sel)});alert(`저장 완료: ${res.saved}`);}catch(e){alert(e.message)}}
+function resetChange(){ if(selectedFileIdx<0) return; const r=filteredResults[selectedFileIdx]; $('chg_title').value=r.original?.title||''; $('chg_artist').value=r.original?.artist||''; $('chg_album').value=r.original?.album||''; }
+function manualSearch(){}
+$('fileFilter').addEventListener('input',applyFilter);
+pollJobs();
+</script>
+</body>
+</html>
