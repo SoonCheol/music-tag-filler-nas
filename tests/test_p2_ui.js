@@ -33,6 +33,25 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  const sorting=harness();
+  sorting.run("currentResults=[{path:'z.mp3',file_state:'review'},{path:'b.mp3',file_state:'auto',_checked:true},{path:'a.mp3',file_state:'saved'},{path:'c.mp3',file_state:'auto',_checked:false}];filteredResults=currentResults.slice();selectFile(1)");
+  sorting.$('chg_title').value='Unsaved title';
+  sorting.run("captureCurrent();editingResult._dirty=true");
+  const invariant=()=>sorting.run("JSON.stringify({paths:currentResults.map(r=>r.path),checks:currentResults.map(r=>r._checked),selected:editingResult.path,draft:editingResult._draft,fields:editingResult._fields,dirty:editingResult._dirty,targets:saveTarget().rows.map(r=>r.path)})");
+  const beforeSort=invariant();
+  const sortedPaths=()=>sorting.run("filteredResults.map(r=>r.path).join(',')");
+  sorting.run("sortFiles('state')");assert.equal(sortedPaths(),'b.mp3,c.mp3,z.mp3,a.mp3');assert.equal(invariant(),beforeSort);
+  assert.equal(sorting.$('fileStateHeader').attributes['aria-sort'],'ascending');
+  sorting.run("sortFiles('state')");assert.equal(sortedPaths(),'a.mp3,z.mp3,b.mp3,c.mp3');assert.equal(invariant(),beforeSort);
+  sorting.run("sortFiles('name')");assert.equal(sortedPaths(),'a.mp3,b.mp3,c.mp3,z.mp3');assert.equal(invariant(),beforeSort);
+  sorting.run("sortFiles('name')");assert.equal(sortedPaths(),'z.mp3,c.mp3,b.mp3,a.mp3');assert.equal(invariant(),beforeSort);
+  sorting.$('fileFilter').value='b.mp3';sorting.run('applyFilter()');assert.equal(sortedPaths(),'b.mp3');assert.equal(invariant(),beforeSort);
+  sorting.$('fileFilter').value='';sorting.run('applyFilter()');assert.equal(sortedPaths(),'z.mp3,c.mp3,b.mp3,a.mp3');assert.equal(invariant(),beforeSort);
+  sorting.run('toggleSelectAll(true)');assert.equal(sorting.run('saveTarget().rows.length'),2);
+  assert.ok(html.includes('<span>변경태그</span><span>미리보기</span>'));
+  assert.ok(html.includes('white-space:nowrap;word-break:keep-all;overflow-wrap:normal'));
+  for(const note of ['빨간색 글씨는 저장 시 변경될 태그입니다.','미리보기는 실제 파일을 변경하지 않습니다.','커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.'])assert.ok(html.includes(note));
+
   assert.ok(!html.includes('id="btnStop"'));
   assert.ok(!script.includes('async function stopScan'));
   const scanUi=harness();

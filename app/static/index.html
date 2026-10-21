@@ -58,6 +58,11 @@ tr.selected{background:var(--blue-light) !important}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
  .candidate-feedback{margin-top:8px;padding:8px 10px;border:1px solid #b8cdef;border-radius:4px;background:var(--blue-light);line-height:1.7;overflow-wrap:anywhere}
 .button-tooltip{position:fixed;z-index:1000;width:320px;max-width:calc(100vw - 24px);padding:10px 12px;border:1px solid #c5cbd5;border-radius:6px;background:#fff;color:var(--text);font-size:12px;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere;box-shadow:0 4px 16px #0002;pointer-events:none}
+.current-tag-heading{display:flex;align-items:center;gap:12px;margin-bottom:8px}.current-tag-heading h4{margin-bottom:0}
+.sort-heading{border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;cursor:pointer;padding:4px 0;white-space:nowrap}
+.sort-heading:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+#tagPreviewLabel{flex-shrink:0;color:#c62828;font-size:11px;line-height:1.5}
+#tagPreviewLabel span{display:block;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
 </style>
 </head>
 <body>
@@ -91,7 +96,7 @@ tr.selected{background:var(--blue-light) !important}
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th>파일명</th><th style="width:70px">상태</th></tr></thead>
+        <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th id="fileNameHeader" aria-sort="none"><button class="sort-heading" id="sortFileName" onclick="sortFiles('name')">파일명</button></th><th id="fileStateHeader" aria-sort="none" style="width:85px"><button class="sort-heading" id="sortFileState" onclick="sortFiles('state')">상태</button></th></tr></thead>
         <tbody id="fileBody"><tr><td colspan="4" style="text-align:center;padding:30px;color:#999">스캔을 시작하세요</td></tr></tbody>
       </table>
     </div>
@@ -106,9 +111,9 @@ tr.selected{background:var(--blue-light) !important}
     <div class="panel">
       <div class="tag-box">
         <div class="tag-section">
-          <h4>현재 태그 정보</h4>
+          <div class="current-tag-heading"><h4>현재 태그 정보</h4><div id="tagPreviewLabel" hidden><span>변경태그</span><span>미리보기</span></div></div>
           <div style="display:flex;gap:12px">
-            <div style="width:110px;flex-shrink:0"><div class="cover" id="currentCover"><span>no image</span></div><div id="tagPreviewLabel" hidden style="margin-top:6px;color:#c62828;font-size:11px;line-height:1.5">변경 태그 미리보기</div></div>
+            <div style="width:110px;flex-shrink:0"><div class="cover" id="currentCover"><span>no image</span></div></div>
             <div style="flex:1" class="tag-grid no-check">
               <div>제목 :</div><div id="cur_title"></div>
               <div>가수 :</div><div id="cur_artist"></div>
@@ -119,7 +124,7 @@ tr.selected{background:var(--blue-light) !important}
               <div>장르 :</div><div id="cur_genre"></div>
             </div>
           </div>
-          <div id="tagPreviewNote" hidden style="margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6">실제 파일은 변경되지 않았습니다. 커버는 원본 미리보기이며 선택한 최대 크기로 저장 시 조정됩니다. 가사·파일명·식별자의 최종 결과도 저장 시 검증됩니다.</div>
+          <div id="tagPreviewNote" hidden style="margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6"><div>빨간색 글씨는 저장 시 변경될 태그입니다.</div><div>미리보기는 실제 파일을 변경하지 않습니다.</div><div>커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.</div></div>
         </div>
         <div class="tag-section">
           <h4><label><input type="checkbox" id="checkAllChange" checked onchange="toggleAllChange(this.checked)"> 변경할 태그 정보</label> <span style="font-weight:400;color:#666;font-size:11px">— 체크된 항목만 저장</span></h4>
@@ -381,6 +386,23 @@ async function cancelSpecific(id){ if(!confirm('이 작업을 중지할까요?')
 async function deleteSpecific(id){if(!confirm('작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/jobs/'+id,{method:'DELETE'});if(currentJobId===id){currentJobId=null;displayedJobId=null;currentResults=[];editingResult=null;applyFilter();}pollJobs();}catch(e){alert(e.message);}}
 async function resumeSpecific(id){currentJobId=id;await resumeScan();}
 async function loadJob(id){if(saving||actionResolver)return;if(id!==currentJobId&&!await allowDraftMove())return;const job=await api('/api/jobs/'+id);adoptJob(job);}
+let fileSortColumn=null,fileSortDirection=1;
+const fileNameCompare=(a,b)=>a.path.split('/').pop().localeCompare(b.path.split('/').pop(),'ko',{numeric:true,sensitivity:'base'})||a.path.localeCompare(b.path,'ko',{numeric:true});
+function sortFiles(column){
+  captureCurrent();
+  fileSortDirection=fileSortColumn===column?-fileSortDirection:1;fileSortColumn=column;
+  renderFileList();persistView();
+}
+function sortFileDisplay(){
+  const selected=filteredResults[selectedFileIdx];
+  if(fileSortColumn)filteredResults.sort((a,b)=>fileSortColumn==='name'?fileSortDirection*fileNameCompare(a,b):fileSortDirection*(({auto:0,review:1,saved:2}[fileState(a)])-({auto:0,review:1,saved:2}[fileState(b)]))||fileNameCompare(a,b));
+  selectedFileIdx=selected?filteredResults.indexOf(selected):-1;
+  [['name','fileNameHeader','sortFileName','파일명'],['state','fileStateHeader','sortFileState','상태']].forEach(([column,header,button,label])=>{
+    const active=fileSortColumn===column;
+    $(header).setAttribute('aria-sort',active?(fileSortDirection===1?'ascending':'descending'):'none');
+    $(button).textContent=label+(active?(fileSortDirection===1?' ▲':' ▼'):'');
+  });
+}
 function applyFilter(){
   captureCurrent();const selectedPath=editingResult?.path;
   const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q));
@@ -400,7 +422,7 @@ async function requestSelectFile(idx){
   if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
 }
 function renderFileList(){
-  sanitizeChecks();const body=$('fileBody');
+  sortFileDisplay();sanitizeChecks();const body=$('fileBody');
   if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
   body.innerHTML='';filteredResults.forEach((r,i)=>{
     const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장됨'}[state];
