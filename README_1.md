@@ -1,3 +1,5 @@
+> 레거시 설치 예시 문서입니다. 주소·경로는 예시이며, 현재 v6 자동 배포는 [DEPLOYMENT.md](DEPLOYMENT.md)를 따릅니다.
+
 
 # 음악 정보 채우기 - NAS Docker Web 버전
 
@@ -17,7 +19,7 @@
 ## Ugreen NAS 설치
 
 ### 1. 폴더 구조
-/volume3/docker3/music-tag-filler-nas/
+/srv/docker/music-tag-filler-nas/
   ├── Dockerfile
   ├── docker-compose.yml
   ├── requirements.txt
@@ -25,7 +27,7 @@
       ├── main.py
       └── static/index.html
 
-/volume3/docker3/music-tag-filler-nas/data/  ← 자동 생성
+/srv/docker/music-tag-filler-nas/data/  ← 자동 생성
 
 ### 2. Portainer 배포
 Portainer > Stacks > Add Stack > Build method: Repository 또는 Upload
@@ -33,15 +35,15 @@ portainer-stack.yml 붙여넣기, Build and deploy
 
 또는 SSH:
 ```
-cd /volume3/docker3/music-tag-filler-nas
+cd /srv/docker/music-tag-filler-nas
 docker compose up -d --build
 ```
 
 ### 3. 접속
-- 로컬: http://192.168.0.100:8000
-- NPM: nas.homedisk.net 도메인 추가
-  - Domain: tag.homedisk.net (또는 nas.homedisk.net/tag/)
-  - Forward Hostname: 192.168.0.100
+- 로컬: http://nas.example.invalid:8000
+- NPM: nas.example.invalid 도메인 추가
+  - Domain: tag.example.invalid (또는 nas.example.invalid/tag/)
+  - Forward Hostname: nas.example.invalid
   - Forward Port: 8000
   - Websockets Support ON
   - Cloudflare SSL
@@ -59,13 +61,13 @@ docker compose up -d --build
 FuZhouhao/music-tag-web — NAS 최적화, Docker Hub에 이미 빌드됨
 ```
 docker pull xhongc/music_tag_web:latest
-docker run -d -p 8002:8002 -v /volume1/Multimedia/Music:/app/media:rw -v /volume3/docker3/music-tag-web/data:/app/data --restart=always xhongc/music_tag_web:latest
+docker run -d -p 8002:8002 -v /srv/music:/app/media:rw -v /srv/docker/music-tag-web/data:/app/data --restart=always xhongc/music_tag_web:latest
 ```
-접속: http://192.168.0.100:8002/admin  admin/admin
+접속: http://nas.example.invalid:8002/admin (인증 설정은 해당 제품의 공식 안내 참고)
 
 ## 안전 팁
 - 처음엔 하위 폴더 하나만 테스트
-- /volume1/Multimedia/Music 스냅샷 있으면 더 안전
+- /srv/music 스냅샷 있으면 더 안전
 - .tagbak.json 백업은 되돌리기용, 공유 금지 (가사 저작권)
 
 ## 개선 가능

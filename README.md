@@ -1,68 +1,51 @@
+# Music Tag Filler NAS v6
 
-# 음악 정보 채우기 NAS Web v0.3.0 - DXP4800+ 전용
+음악 검색·후보 적용·태그/커버/가사 처리와 무결성 백업을 제공하는 NAS 웹 앱입니다.
+이 비공개 저장소는 소스·설치 방법·운영 기록을 보관합니다.
+**음악, 프로그램 data, API 키, SSH 개인키는 별도 백업해야 합니다.**
 
-원작: microhan - 음악 정보 채우기 v0.2.3 (Windows exe)
-이식: Ugreen DXP4800+ Docker, 한국어 UI, 드래그 없음, 백그라운드 지속 스캔
+## 다시 설치하거나 AI에게 인계할 때
 
-## 왜 새로 만들었나
-- music-tag-web은 중문 기반, UI/검색 품질 불만족으로 제외
-- 원작의 핵심 안전규칙 그대로 유지 필요:
-  - MusicBrainz + iTunes KR → US 폴백 교차조회
-  - AcoustID 음향 지문 (fpcalc, 파일 업로드 없음)
-  - LRCLIB 가사 - "틀린 가사보다 빈 가사가 낫다" 4원칙
-  - 빈칸만 채우기, 90점 이상 자동 지정, 커버 1000px JPEG
-  - .tagbak.json 바이트 단위 백업 + 되돌리기
+| 문서 | 내용 |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | 향후 Codex/AI의 개발·테스트·배포·Git 규칙 |
+| [현재 NAS](docs/CURRENT_NAS.md) | 실제 IP·계정·경로·환경·마운트·이미지 조사값 |
+| [신규 설치](docs/INSTALL_KO.md) | GitHub clone부터 Windows/새 NAS/Portainer 설치까지 |
+| [업데이트·버전 관리](docs/OPERATIONS_KO.md) | 테스트·자동 배포·장애 대응·릴리스 절차 |
+| [백업·복구](docs/BACKUP_RESTORE_KO.md) | data·설정·이미지·음악·키의 별도 백업 및 복원 |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | 배포 스크립트의 모드와 보존 검사 |
+| [변경 기록](CHANGELOG.md) | Unreleased와 기존 P0/P1/P2·UI 이력 |
+| [라이선스](THIRD_PARTY_NOTICES.md) | 원본 MIT와 Chromaprint/FFmpeg 고지 |
+| [준비 검증 결과](docs/READINESS_REPORT.md) | 누락·보안·테스트·실행하지 않은 항목 |
+| [보안 검사](docs/SECURITY_AUDIT_KO.md) | 비밀값 검사·기존 의존성 보안 공지와 후속 작업 |
+| [v1.0.0 등록 준비](docs/RELEASE_V1_0_0.md) | 운영 재점검·릴리스 문안·등록 전 남은 절차 |
 
-## 기능 (드래그 제외)
-1. **폴더 브라우저**: /music 하위 폴더 목록에서 선택, 직접 경로 입력도 가능
-2. **백그라운드 스캔**: FastAPI BackgroundTasks + jobs.json 영구 저장. 브라우저 닫아도 NAS에서 계속, 재접속 시 /api/jobs 로 진행률 복구
-3. **후보 표**: 제목/가수/앨범/연도/출처/일치도. 작은 커버 hover 시 300px 미리보기 (원작 동일)
-4. **표지**: 파일 고르기 또는 후보 클릭으로 적용. 일괄 적용 후 전체 저장
-5. **가사**: LRCLIB, 옵션 켜면 저장 시에만 시도. 서버 바쁨이면 "서버가 바빠 찾지 못함" 표시, 재저장 시 재시도
-6. **저장**: /data/backups 에도 백업 복사본, 되돌리기는 .tagbak.json 기반
+## 활성 파일
 
-## 설치 - Ugreen DXP4800+
+`app/main.py`는 FastAPI, `storage.py`는 저장·백업·복원,
+`search_service.py`는 검색/커버, `job_service.py`는 탐색/이어하기,
+`preferences.py`는 설정/임시 커버, `app/static/index.html`은 웹 화면입니다.
+원본의 MIT 코드는 `app/upstream/`에 있습니다.
 
-### SSH 1회
+현재 설치에는 루트 `Dockerfile`, `requirements.txt`, `requirements.lock.txt`,
+`portainer-stack.yml`, `docker-compose.yml`을 사용합니다.
+`*_1`, `*_new`, `main_new.py`, `README_1.md`는 역사적 대안이며 운영에 적용하지 않습니다.
+
+## 기존 NAS 업데이트 명령
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1 -CheckOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1 -PreflightOnly
+# 실제 배포를 요청받은 경우에만:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1
 ```
-mkdir -p /volume3/docker3/music-tag-filler-nas/data
-cd /volume3/docker3/music-tag-filler-nas
-# 파일 업로드 후
-docker compose up -d --build
-```
 
-### Portainer
-Stacks > Add Stack > Name: music-tag-filler
-Build method: Upload > docker-compose.yml 업로드
-또는 Web editor에 위 compose 붙여넣기
+주소·키 경로 등은 Git에서 제외되는 `deploy-nas.local.json`에서 읽습니다.
+새 PC에서는 `deploy-nas.example.json`을 복사하여 현재 NAS 문서의 값으로 채웁니다.
+신규 설치에는 먼저 컨테이너/스택을 만들어야 하므로 설치 문서를 따릅니다.
 
-접속:
-- 로컬: http://192.168.0.100:8000
-- NPM: nas.homedisk.net
-  - Proxy Host: tag.homedisk.net
-  - Forward: 192.168.0.100:8000
-  - Websockets ON
-  - SSL: Cloudflare 인증서
+운영 음악은 사용자 요청으로 **`/music:rw`**로 전환했습니다. 실제 저장·이름 변경·되돌리기가
+가능하므로 원본 백업을 유지합니다. 검증 결과는 [쓰기 마운트 검증](docs/RW_MOUNT_VALIDATION.md)을 참고하며 테스트는 격리된 생성 음원만 사용합니다.
 
-## 사용법 (NAS)
-1. 웹 접속 > 📁 버튼으로 폴더 선택 (예: Trot/ 또는 빈칸=전체)
-2. 체크: [x] 빈칸만 채우기(안전) [ ] 가사도 채우기 [ ] 파일명도 바꾸기
-3. 스캔 시작 → "백그라운드 스캔 시작" 알림. 창 닫아도 됨
-4. 재접속 > 오른쪽 하단 백그라운드 작업에서 진행률/현재 파일 확인
-5. 후보 클릭 → 오른쪽 필드/왼쪽 커버에 적용
-6. 저장 또는 전체 저장 → /volume1/Multimedia/Music 에 직접 쓰기
-
-## AcoustID 키
-원작 exe에는 키 내장. 이 Docker는 무료 키 필요:
-1. https://acoustid.org/new-application 에서 API Key 발급
-2. docker-compose.yml environment에 ACOUSTID_API_KEY 추가 (현재 코드는 키 없이도 텍스트 검색으로 동작)
-
-## 백업
-- 모든 저장은 원본을 .tagbak.json으로 남김
-- /volume3/docker3/music-tag-filler-nas/data/backups 에도 복사
-- 스냅샷 있는 상태에서 테스트 권장
-
-## 로그
-```
-docker logs music-tag-filler-nas -f
-```
+정식 이름 이전과 GitHub 등록의 실제 진행 상태는 [v1.0.0 등록 상태](docs/V1_REGISTRATION_STATUS.md)를
+따릅니다. push 완료를 확인하기 전에는 GitHub만으로 최신 작업을 복구할 수 없습니다.

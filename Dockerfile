@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ln -sf /usr/bin/fpcalc /usr/local/bin/fpcalc || true
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements.lock.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock.txt
 
 COPY app/ ./app/
 WORKDIR /app

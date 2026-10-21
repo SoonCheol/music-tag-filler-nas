@@ -1,0 +1,37 @@
+name: Repository validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui-and-repository:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node tests/test_ui_save.js
+      - run: node tests/test_p2_ui.js
+      - run: node tests/test_gitignore.js
+      - run: node tests/test_repository_readiness.js
+      - shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/deploy-nas.tests.ps1
+  isolated-audio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: docker build -t music-tag-filler-ci:validation .
+      - name: P0 P1 P2 regression with generated audio only
+        run: >-
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=512m
+          -e PYTHONDONTWRITEBYTECODE=1
+          --mount type=bind,source=${{ github.workspace }}/tests,target=/app/tests,readonly
+          -w /app music-tag-filler-ci:validation
+          python -m unittest discover -s tests -p 'test_p*.py' -q

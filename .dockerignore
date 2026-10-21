@@ -1,0 +1,27 @@
+# Send only build inputs; never send Git metadata, docs, local settings or data.
+*
+!Dockerfile
+!requirements.txt
+!requirements.lock.txt
+!app/
+!app/**
+**/__pycache__
+**/*.pyc
+**/*.local.*
+**/.env*
+**/*.pem
+**/*.key
+**/acoustid_key.txt
+**/settings*.json
+**/jobs*.json
+**/data
+**/backups
+**/deploy-backups
+**/*.tagbak*
+**/*.[mM][pP]3
+**/*.[fF][lL][aA][cC]
+**/*.[mM]4[aA]
+**/*.[oO][gG][gG]
+**/*.[wW][aA][vV]
+**/*.[wW][mM][aA]
+**/*.[mM][pP]4
