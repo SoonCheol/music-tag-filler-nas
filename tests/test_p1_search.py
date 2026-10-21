@@ -198,3 +198,50 @@ class P1Tests(unittest.TestCase):
         item = self.item(updated, selection="manual", candidate_id=candidate["id"], values={"title": "Wonderful Song"})
         self.assertEqual(self.http(self.request([item]))["saved"], 1)
         self.http({"path": path.name, "query": "query", "expected_revision": "0" * 64}, "/api/jobs/test/search", expected=409)
+
+    def test_cover_concurrent_requests_share_upstream_and_release_keys_differ(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import time
+        service._cover_cache.clear()
+        value=service.candidate_dict(self.candidate(cover_url='https://example/shared'))
+        other={**value,'title':'Different title'}
+        entered,release=threading.Event(),threading.Event()
+        def download(*args,**kwargs):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return p0.image_bytes('blue')
+        with patch.object(net,'get_bytes',side_effect=download) as call:
+            with ThreadPoolExecutor(3) as pool:
+                a=pool.submit(service.fetch_cover,value)
+                self.assertTrue(entered.wait(3))
+                b=pool.submit(service.fetch_cover,value)
+                c=pool.submit(service.fetch_cover,other)
+                try:
+                    for _ in range(100):
+                        with service._cover_lock:
+                            pending=len(service._cover_pending)
+                        if pending>=3:break
+                        time.sleep(.01)
+                    self.assertGreaterEqual(pending,3)
+                    self.assertEqual(call.call_count,1)
+                finally:release.set()
+                self.assertEqual(a.result()[0],b.result()[0]);self.assertEqual(a.result()[0],c.result()[0])
+        self.assertEqual(service._cover_pending,{})
+        first={**value,'mb_release_id':'release-a','mb_release_group_id':'group-a'}
+        second={**value,'mb_release_id':'release-b','mb_release_group_id':'group-b'}
+        self.assertNotEqual(service.candidate_id(first),service.candidate_id(second))
+        service._cover_cache.clear()
+        with patch.object(net,'get_bytes',side_effect=[p0.image_bytes('red'),p0.image_bytes('blue')]) as call:
+            self.assertNotEqual(service.fetch_cover(first)[0],service.fetch_cover(second)[0])
+            self.assertEqual(call.call_count,2)
+
+    def test_cover_fallback_requires_both_names_and_failure_can_retry(self):
+        for album,artist in [('Album','Wrong singer'),('Wrong album','Singer')]:
+            with patch.object(net,'get_json',return_value={'results':[{'collectionName':album,'artistName':artist,'artworkUrl100':'https://example/100x100.jpg'}]}):
+                self.assertIsNone(itunes.album_artwork('Album','Singer','US'))
+        service._cover_cache.clear()
+        value=service.candidate_dict(self.candidate(cover_url='https://example/retry'))
+        with patch.object(net,'get_bytes',side_effect=[net.NetworkError('timeout'),p0.image_bytes('blue')]) as call,patch.object(itunes,'album_artwork',return_value=None):
+            self.assertIsNone(service.fetch_cover(value)[0])
+            self.assertIsNotNone(service.fetch_cover(value)[0])
+            self.assertEqual(call.call_count,2)

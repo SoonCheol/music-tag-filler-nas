@@ -11,7 +11,7 @@ function harness() {
   function element() {return {value:'',checked:false,hidden:true,style:{},children:[],listeners:{},attributes:{},scrollTop:0,
     showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return this.valid!==false;},
     innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},focus(){},
-    appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(){this.children.forEach(c=>c.parent=null);this.children=[];},
+    appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(...children){this.children.forEach(c=>c.parent=null);this.children=[];children.forEach(c=>this.appendChild(c));},
     addEventListener(name,fn){this.listeners[name]=fn;},contains(target){return target===this||this.children.some(c=>c.contains(target));}};}
   function $(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
   for(const field of ['title','artist','album','albumartist','track','year','genre']){const check=element();check.checked=true;check.dataset={field};checks.push(check);}
@@ -33,6 +33,20 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  const hover=harness(),hoverImages=[];
+  const create=hover.context.document.createElement;
+  hover.context.document.createElement=tag=>{const node=create(tag);if(tag==='img')hoverImages.push(node);return node;};
+  hover.context.hoverRow={path:'fake.mp3',original:{},candidates:[{id:'a',album:'A'},{id:'b',album:'B'}]};
+  hover.run("currentJobId='hover';showHoverCover(hoverRow.candidates[0],hoverRow)");
+  assert.equal(hover.$('hoverCoverStatus').textContent,'커버 불러오는 중…');assert.equal(hover.$('hoverCoverImage').children.length,0);
+  const imageA=hoverImages.at(-1);
+  hover.run('showHoverCover(hoverRow.candidates[1],hoverRow)');const imageB=hoverImages.at(-1);
+  imageB.onload();imageA.onload();assert.equal(hover.$('hoverCoverImage').children[0],imageB);
+  imageA.onerror();assert.equal(hover.$('hoverCoverRetry').hidden,true);
+  hover.run('showHoverCover(hoverRow.candidates[1],hoverRow)');hoverImages.at(-1).onerror();assert.equal(hover.$('hoverCoverRetry').hidden,false);
+  hover.run('retryHoverCover()');assert.ok(hoverImages.at(-1).src.includes('retry='));hoverImages.at(-1).onload();assert.equal(hover.$('hoverCoverStatus').textContent,'');
+  const late=hoverImages.at(-1);hover.run('hideHoverCover()');late.onload();assert.equal(hover.$('hoverPrev').style.display,'none');
+
   const common=harness();
   common.context.commonJob={id:'common-fields',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',album:'Dance CD1',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'auto',original:{title:'Two',album:'Dance CD2',revision:'a'.repeat(64)}}]};
   common.run('adoptJob(commonJob)');

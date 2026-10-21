@@ -53,7 +53,7 @@ tr.selected{background:var(--blue-light) !important}
 .job{border:1px solid var(--line2);border-radius:4px;padding:6px;background:#fff;font-size:11px}
 .cand-table{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:4px;margin-top:8px}
 .status-line{padding:6px 10px;font-size:11px;color:var(--muted);background:#fafafa;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-.hover-preview{position:fixed;display:none;z-index:99;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none}
+.hover-preview{position:fixed;display:none;z-index:99;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:auto}
 .hover-preview img{width:240px;height:240px;object-fit:cover;border-radius:4px;display:block}
  .result-counts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 .result-counts span{padding:6px 9px;border:1px solid var(--line);border-radius:4px}
@@ -180,7 +180,7 @@ tr.selected{background:var(--blue-light) !important}
 </div>
 
 <div id="buttonTooltip" class="button-tooltip" role="tooltip" hidden></div>
-<div id="hoverPrev" class="hover-preview"><img></div>
+<div id="hoverPrev" class="hover-preview"><div id="hoverCoverStatus" role="status"></div><div id="hoverCoverImage"></div><button id="hoverCoverRetry" class="btn" hidden onclick="retryHoverCover()">다시 시도</button></div>
 
 <dialog id="saveOptionsDialog" class="options-dialog" aria-labelledby="saveOptionsTitle">
   <form id="saveOptionsForm" onsubmit="applySaveOptions(event)">
@@ -493,12 +493,28 @@ function selectFile(idx){
   if(!searching&&r.search_status)$('statusLine').textContent=searchSummary(r);
   renderCandidates(r);updateSavePreview();persistView();
 }
+let hoverCoverToken=0,hoverCoverTarget=null,hoverCoverFailed=false;
+function hideHoverCover(){hoverCoverToken++;hoverCoverTarget=null;hoverCoverFailed=false;$('hoverPrev').style.display='none';}
+function showHoverCover(c,r,retry=false){
+  const token=++hoverCoverToken,url=candidateCoverUrl(c,r);hoverCoverTarget={c,r};hoverCoverFailed=false;
+  $('hoverPrev').style.display='block';$('hoverCoverImage').replaceChildren();$('hoverCoverRetry').hidden=true;
+  $('hoverCoverStatus').textContent=url?'커버 불러오는 중…':'일치하는 커버가 없습니다.';
+  if(!url)return;
+  const img=document.createElement('img');img.alt='후보 커버';
+  img.onload=()=>{if(token!==hoverCoverToken)return;$('hoverCoverStatus').textContent='';$('hoverCoverImage').replaceChildren(img);};
+  img.onerror=()=>{if(token!==hoverCoverToken)return;hoverCoverFailed=true;$('hoverCoverStatus').textContent='커버를 불러오지 못했습니다.';$('hoverCoverRetry').hidden=false;};
+  img.src=url+(retry?'&retry='+token:'');
+}
+function retryHoverCover(){if(hoverCoverTarget)showHoverCover(hoverCoverTarget.c,hoverCoverTarget.r,true);}
+$('hoverPrev').addEventListener('mouseleave',hideHoverCover);
 function renderCandidates(r){
+  hideHoverCover();
+
   const body=$('candBody'); body.innerHTML=''; if(!r.candidates||!r.candidates.length){body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:12px;color:#999">후보 없음</td></tr>';return}
   r.candidates.forEach((c,i)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${esc(c.title)}</td><td>${esc(c.artist)}</td><td>${esc(c.album)}</td><td>${esc(c.year)}</td><td>${esc(c.source)}</td><td>${c.score}</td>`;
-    tr.onmouseenter=()=>{ const url=candidateCoverUrl(c,r);if(url){const hp=$('hoverPrev'); hp.style.display='block'; hp.querySelector('img').src=url;}};
+    tr.onmouseenter=()=>showHoverCover(c,r);
     tr.onmousemove=(e)=>{
       const hp=$('hoverPrev');
       const imgH=240, pad=12;
@@ -512,7 +528,7 @@ function renderCandidates(r){
       hp.style.left=left+'px';
       hp.style.top=top+'px';
     };
-    tr.onmouseleave=()=>{$('hoverPrev').style.display='none';};
+    tr.onmouseleave=e=>{if(!hoverCoverFailed&&!$('hoverPrev').contains(e?.relatedTarget))hideHoverCover();};
     tr.onclick=()=>{
       document.querySelectorAll('#candBody tr').forEach(el=>el.classList.remove('selected'));
       tr.classList.add('selected');

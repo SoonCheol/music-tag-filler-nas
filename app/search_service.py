@@ -1,6 +1,6 @@
 """Search/cover orchestration over pinned upstream logic; no music writes."""
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future, TimeoutError
 from dataclasses import asdict, fields
 import io
 import json
@@ -19,6 +19,7 @@ COUNTRIES = search_itunes.COUNTRIES
 _CANDIDATE_FIELDS = {field.name for field in fields(match.Candidate)}
 _cover_cache = OrderedDict()
 _cover_lock = threading.Lock()
+_cover_pending = {}
 _COVER_CACHE_BYTES = 32 * 1024 * 1024
 
 
@@ -87,7 +88,7 @@ def candidate_dict(candidate):
 
 def candidate_id(value):
     identifying = {name: value.get(name) for name in
-                   ("source", "title", "artist", "album", "year", "track", "cover_url", "mbid")}
+                   ("source", "title", "artist", "album", "year", "track", "cover_url", "mbid", "mb_release_id", "mb_release_group_id", "albumartist", "album_artist", "itunes_id")}
     return storage.digest(json.dumps(identifying, sort_keys=True, ensure_ascii=False).encode("utf-8"))[:24]
 
 
@@ -220,6 +221,63 @@ def prepare_image(data):
 
 
 def fetch_cover(value, country="US", cancel=None, on_wait=None):
+    key = (candidate_id(value), country)
+    with _cover_lock:
+        pending = _cover_pending.get(key)
+        owner = pending is None
+        if owner:
+            pending = Future()
+            _cover_pending[key] = pending
+    if not owner:
+        while True:
+            if cancel is not None and cancel.is_set():
+                return None, [error("cover", "cancelled", "표지 요청이 중지되었습니다")]
+            try:
+                return pending.result(timeout=0.2)
+            except TimeoutError:
+                continue
+    try:
+        outcome = _fetch_cover(value, country, cancel, on_wait)
+        pending.set_result(outcome)
+        return outcome
+    except Exception as exc:
+        pending.set_exception(exc)
+        raise
+    finally:
+        with _cover_lock:
+            _cover_pending.pop(key, None)
+
+
+def _cover_bytes(url, on_wait, cancel):
+    # Different candidates can still point at exactly the same image URL.
+    key = ("image-url", url)
+    with _cover_lock:
+        pending = _cover_pending.get(key)
+        owner = pending is None
+        if owner:
+            pending = Future()
+            _cover_pending[key] = pending
+    if not owner:
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise net.NetworkError("cancelled")
+            try:
+                return pending.result(timeout=0.2)
+            except TimeoutError:
+                continue
+    try:
+        data = net.get_bytes(url, on_wait=on_wait, cancel=cancel)
+        pending.set_result(data)
+        return data
+    except Exception as exc:
+        pending.set_exception(exc)
+        raise
+    finally:
+        with _cover_lock:
+            _cover_pending.pop(key, None)
+
+
+def _fetch_cover(value, country="US", cancel=None, on_wait=None):
     candidate = candidate_model(value)
     key = (candidate_id(value), country)
     with _cover_lock:
@@ -235,7 +293,7 @@ def fetch_cover(value, country="US", cancel=None, on_wait=None):
         if not url or (cancel and cancel.is_set()):
             return None
         try:
-            data = net.get_bytes(url, on_wait=on_wait, cancel=cancel)
+            data = _cover_bytes(url, on_wait, cancel)
             if not data:
                 return None
             prepared = prepare_image(data)
