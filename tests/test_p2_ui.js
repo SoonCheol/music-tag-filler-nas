@@ -33,6 +33,25 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  const common=harness();
+  common.context.commonJob={id:'common-fields',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',album:'Dance CD1',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'auto',original:{title:'Two',album:'Dance CD2',revision:'a'.repeat(64)}}]};
+  common.run('adoptJob(commonJob)');
+  common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked=false;
+  common.run('captureCurrent()');
+  await common.run('requestSelectFile(1)');
+  assert.equal(common.$('actionDialog').open,undefined);
+  assert.equal(common.run('editingResult.path'),'two.mp3');
+  assert.equal(common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked,false);
+  assert.equal(common.run("currentResults.every(r=>!saveItem(r).fields.includes('album'))"),true);
+  common.$('chg_title').value='Unsaved edit';common.$('chg_title').listeners.input();
+  const stay=common.run('requestSelectFile(0)');assert.equal(common.$('actionTitle').textContent,'미저장 변경사항');
+  assert.equal(common.$('actionAccept').textContent,'버리고 이동');assert.equal(common.$('actionCancel').textContent,'계속 편집');
+  common.run('resolveAction(false)');await stay;assert.equal(common.run('editingResult.path'),'two.mp3');assert.equal(common.$('chg_title').value,'Unsaved edit');
+  const leave=common.run('requestSelectFile(0)');common.run('resolveAction(true)');await leave;
+  await common.run('requestSelectFile(1)');assert.equal(common.$('chg_title').value,'Two');
+  common.run('adoptJob(commonJob)');common.run('selectFile(1)');assert.equal(common.$('chg_title').value,'Two');
+  assert.equal(common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked,false);
+
   const progress=harness();
   progress.context.tasks=[{id:'first',job_id:'one',status:'saving',saved:23,total:49,processed:25,failed:1,skipped:1,partial:0,current_file:'<long>.mp3',current_path:'/music/folder/<long>.mp3'},{id:'second',job_id:'two',status:'done',saved:2,total:2,processed:2,failed:0,skipped:0,partial:0}];
   progress.run('renderSaveTasks(tasks)');

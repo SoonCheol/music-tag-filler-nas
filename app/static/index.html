@@ -226,6 +226,7 @@ tr.selected{background:var(--blue-light) !important}
 let currentJobId=null,allJobs=[],currentResults=[],filteredResults=[],selectedFileIdx=-1;
 let editingResult=null,displayedJobId=null,saving=false,searching=false,lastJobSignature='';
 const tagFields=['title','artist','album','albumartist','track','year','genre'];
+let commonTagFields=[...tagFields];
 let previewPath=null,previewRevision=null;
 const draftJobs=new Map();
 let actionResolver=null;
@@ -245,15 +246,25 @@ function candidateValues(c){
   if(!c)return {};
   return $('artistPreference').value==='latin'?{...c,artist:c.artist_latin||c.artist,albumartist:c.album_artist_latin||c.albumartist}:{...c};
 }
-function draftSignature(r){return JSON.stringify([r._draft,r._fields,r._candidateId||null,r._coverId||null]);}
+function draftSignature(r){return JSON.stringify([r._draft,r._candidateId||null,r._coverId||null]);}
 function ensureDraft(r){
+  r._fields=[...commonTagFields];
   if(r._draft)return;
-  r._draft=originalValues(r);r._manualFields=[];r._fields=[...tagFields];r._draftRevision=r.original?.revision||'';
+  r._draft=originalValues(r);r._manualFields=[];r._fields=[...commonTagFields];r._draftRevision=r.original?.revision||'';
   const best=r.auto_apply?r.best:null;r._candidateId=best?.id||null;r._selection=best?'auto':'none';
   if(best){const values=candidateValues(best);tagFields.forEach(f=>{if(values[f])r._draft[f]=String(values[f]);});}
   r._draftBaseline=draftSignature(r);
 }
-function captureCurrent(){if(!editingResult)return;ensureDraft(editingResult);tagFields.forEach(f=>editingResult._draft[f]=$('chg_'+f).value);editingResult._fields=[...document.querySelectorAll('.chg-check')].filter(c=>c.checked).map(c=>c.dataset.field);}
+function captureCurrent(){
+  commonTagFields=[...document.querySelectorAll('.chg-check')].filter(c=>c.checked).map(c=>c.dataset.field);
+  if(!editingResult)return;ensureDraft(editingResult);tagFields.forEach(f=>editingResult._draft[f]=$('chg_'+f).value);
+}
+function resetDraft(r){
+  r._draft=null;r._dirty=false;r._manualFields=[];r._candidateId=null;r._coverId=null;r._candidateFeedback=null;r._appliedFields=[];
+  ensureDraft(r);previewPath=null;previewRevision=null;
+  if(editingResult===r)tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
+}
+
 function adoptJob(job){
   captureCurrent();const selectedPath=editingResult?.path;
   if(displayedJobId)draftJobs.set(displayedJobId,currentResults);
@@ -436,8 +447,11 @@ function fileState(r){return r.file_state||(r.last_save?.status==='saved'||r.las
 function sanitizeChecks(){currentResults.forEach(r=>{if(fileState(r)!=='auto')r._checked=false;});}
 async function allowDraftMove(){
   captureCurrent();if(!editingResult?._dirty||draftSignature(editingResult)===editingResult._draftBaseline)return true;
-  return confirmAction('미저장 편집 보관','현재 곡에 저장하지 않은 편집이 있습니다. 편집 내용을 보관하고 다른 곡으로 이동할까요?','보관하고 이동','계속 편집');
+  const r=editingResult;
+  if(!await confirmAction('미저장 변경사항','현재 곡의 수정 내용을 버리고 이동할까요?','버리고 이동','계속 편집'))return false;
+  resetDraft(r);return true;
 }
+
 async function requestSelectFile(idx){
   if(saving||actionResolver)return;
   const r=filteredResults[idx];if(!r||r===editingResult)return;
@@ -560,7 +574,7 @@ function renderTagPreview(r){
   }
   if($('currentCover').innerHTML!==html)$('currentCover').innerHTML=html;
 }
-function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();if(editingResult)editingResult._dirty=true;updateSavePreview();}
+function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();updateSavePreview();}
 function saveItem(r){
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
@@ -647,7 +661,7 @@ async function discardDraft(){
   if(!editingResult||saving||searching)return;
   const r=editingResult,jobId=currentJobId;if(!await confirmAction('미저장 편집 취소','현재 곡의 미저장 편집을 취소할까요? 음악 파일은 변경하지 않습니다.','편집 취소','계속 편집'))return;
   if(editingResult!==r||currentJobId!==jobId||saving||searching)return;
-  r._dirty=false;r._draft=originalValues(r);r._fields=[...tagFields];r._candidateId=null;r._selection='none';r._coverId=null;r._candidateFeedback=null;r._appliedFields=[];r._draftBaseline=draftSignature(r);
+  resetDraft(r);
   editingResult=null;selectFile(selectedFileIdx);
 }
 async function resetChange(){
@@ -662,7 +676,7 @@ async function resetChange(){
   }catch(e){alert('복원 실패: '+e.message);}finally{saving=false;updateSavePreview();}
 }
 tagFields.forEach(f=>$('chg_'+f).addEventListener('input',()=>{if(editingResult){captureCurrent();editingResult._dirty=true;editingResult._manualFields=[...new Set([...(editingResult._manualFields||[]),f])];editingResult._selection='edit';editingResult._candidateFeedback=null;editingResult._appliedFields=[];updateSavePreview();}}));
-document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{captureCurrent();if(editingResult)editingResult._dirty=true;updateSavePreview();}));
+document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{captureCurrent();updateSavePreview();}));
 function candidateCoverUrl(c,r){return c.id&&(c.cover_url||c.album)?`/api/jobs/${encodeURIComponent(currentJobId)}/cover/${encodeURIComponent(c.id)}?path=${encodeURIComponent(r.path)}`:'';}
 function searchSummary(r){
   const labels={matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};

@@ -167,7 +167,7 @@ function result(path) {
   const saveHandler=script.slice(script.indexOf('async function submitSave'),script.indexOf('async function saveCurrent'));
   assert(!/\bconfirm\(/.test(saveHandler));
   // Preview only reads drafts: all request counts and save payloads stay unchanged.
-  $('fileFilter').value='';$('onlyEmpty').checked=false;run('adoptJob(previewJob)');
+  $('fileFilter').value='';$('onlyEmpty').checked=false;run('toggleAllChange(true);adoptJob(previewJob)');
   const previewCalls=sent.length;
   run('applyCandidate(editingResult,editingResult.candidates[0])');
   assert.equal($('cur_title').textContent,'Original');
@@ -259,11 +259,11 @@ function result(path) {
   run('toggleSelectAll(false)');assert.equal($('btnSaveAll').disabled,true);assert.equal($('btnSaveSelected').disabled,true);
   $('fileFilter').value='';run('applyFilter();selectFile(1)');
   $('chg_title').value='Preserved review draft';$('chg_title').listeners.input();
-  const moveCancel=run('requestSelectFile(2)');assert.equal($('actionAccept').textContent,'보관하고 이동');
+  const moveCancel=run('requestSelectFile(2)');assert.equal($('actionAccept').textContent,'버리고 이동');
   run('resolveAction(false)');await moveCancel;assert.equal(run('editingResult.path'),'review.mp3');
   const moveKeep=run('requestSelectFile(2)');run('resolveAction(true)');await moveKeep;
   assert.equal(run('editingResult.path'),'saved.mp3');assert.equal($('btnSaveCurrent').disabled,false);
-  await run('requestSelectFile(1)');assert.equal($('chg_title').value,'Preserved review draft');
+  await run('requestSelectFile(1)');assert.equal($('chg_title').value,'Original');
   assert.equal(run('fileState(editingResult)'),'review'); // Editing never promotes status.
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

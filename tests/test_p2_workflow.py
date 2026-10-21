@@ -424,3 +424,24 @@ class P2Tests(unittest.TestCase):
         self.assertEqual(finished['current_file'],'')
         main.delete_save_task(task['id'])
         self.assertFalse(any(t['id']==task['id'] for t in main.list_save_tasks()))
+
+    def test_unchecked_album_preserved_for_all_save_scopes_and_candidates(self):
+        for scope in ('current','selected','all'):
+            for selection in ('auto','manual'):
+                with self.subTest(scope=scope,selection=selection):
+                    paths=[self.copy(scope+'-'+selection+'-'+str(i)+'.mp3') for i in range(1 if scope=='current' else 2)]
+                    rows=self.job(paths)
+                    items=[]
+                    for row in rows:
+                        row['candidates']=[{'source':'iTunes','title':'Original song','artist':'Original singer','album':'Replace album','genre':'New genre'}]
+                        candidate=main.automatic_candidate(row)
+                        self.assertIsNotNone(candidate)
+                        candidate_id=candidate['id'] if selection=='auto' else main.candidate_id(row['candidates'][0])
+                        items.append(self.item(row,selection=selection,candidate_id=candidate_id,values={'genre':'New genre','album':'Replace album'},fields=['genre']))
+                    result=self.http(self.request(items,scope=scope,only_empty=False))
+                    self.assertEqual(result['failed'],0)
+                    self.assertEqual(result['saved'],len(paths))
+                    for path in paths:
+                        info=storage.describe(path)
+                        self.assertEqual(info['album'],'Original album')
+                        self.assertEqual(info['genre'],'New genre')
