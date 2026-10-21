@@ -269,6 +269,38 @@ class P2Tests(unittest.TestCase):
         self.assertEqual(info.tags.album_artist, "Latin Album")
         self.assertEqual(info.tags.title, "Song")
 
+    def test_auto_manual_overwrite_matrix_and_all_scope(self):
+        for selection in ("auto", "manual"):
+            for only_empty in (True, False):
+                for checked in (True, False):
+                    with self.subTest(selection=selection, only_empty=only_empty, checked=checked):
+                        path = self.copy("matrix.mp3")
+                        p0.tags.write_file(str(path), p0.tags.Tags(title="Song", artist="빅뱅"))
+                        result = self.job([path])[0]
+                        result["candidates"] = [{"source": "iTunes", "title": "Song", "artist": "BIGBANG"}]
+                        main.prepare_result(result)
+                        candidate = result["candidates"][0]
+                        item = self.item(result, selection=selection, candidate_id=candidate["id"],
+                                         values={"artist": "BIGBANG"}, fields=["artist"] if checked else [])
+                        with patch.object(main, "automatic_candidate", return_value=candidate):
+                            self.http(self.request([item], only_empty=only_empty))
+                        expected = "BIGBANG" if checked and not only_empty else "빅뱅"
+                        self.assertEqual(p0.tags.read_file(str(path)).tags.artist, expected)
+        paths = [self.copy("all1.mp3"), self.copy("all2.mp3")]
+        results = self.job(paths)
+        items = []
+        for result in results:
+            candidate = result["candidates"][0]
+            items.append(self.item(result, selection="auto", candidate_id=candidate["id"],
+                                   fields=["artist"], values={"artist": candidate["artist"]}))
+        def verified(result):
+            return result["candidates"][0]
+        with patch.object(main, "automatic_candidate", side_effect=verified):
+            response = self.http(self.request(items, scope="all", only_empty=False))
+        self.assertEqual(response["saved"], 2)
+        for path, item in zip(paths, items):
+            self.assertEqual(p0.tags.read_file(str(path)).tags.artist, item["values"]["artist"])
+
     def test_option_defaults_and_bounds(self):
         value = preferences.Preferences().model_dump()
         self.assertEqual(value, {"country": "KR", "recurse": True, "only_empty": True,

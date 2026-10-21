@@ -185,7 +185,7 @@ tr.selected{background:var(--blue-light) !important}
       <textarea id="scanPaths" class="input" rows="2" style="width:100%;resize:vertical" placeholder="선택 사항: /music 기준 파일·폴더 상대 경로, 한 줄에 하나" aria-label="스캔할 파일·폴더 상대 경로"></textarea>
       <label><input id="rememberOptions" type="checkbox"> 옵션 기억</label>
       <button type="button" class="btn" onclick="showDiagnostics()">진단</button>
-      <div style="font-size:11px;color:var(--muted);line-height:1.7">확인: 이번 작업에 적용 / 옵션 기억: 다음 접속에도 유지. 경로 입력은 이번 스캔에만 적용됩니다.<br>국가는 다음 스캔·재검색에 적용되며 기존 후보는 바뀌지 않습니다. 자동 후보는 기존 값 보호를 유지합니다.<br>커버 크기·가사·파일명·식별자의 최종 처리 결과는 저장 시 검증됩니다.</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.7">확인: 이번 작업에 적용 / 옵션 기억: 다음 접속에도 유지. 경로 입력은 이번 스캔에만 적용됩니다.<br>국가는 다음 스캔·재검색에 적용되며 기존 후보는 바뀌지 않습니다. 자동·수동 후보 모두 빈 태그 옵션과 항목별 체크를 따릅니다.<br>커버 크기·가사·파일명·식별자의 최종 처리 결과는 저장 시 검증됩니다.</div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:16px">
       <button type="button" class="btn" onclick="cancelSaveOptions()">취소</button>
@@ -542,7 +542,7 @@ async function saveAll(){const target=saveTarget();return submitSave(target.rows
 const fieldLabels={title:'제목',artist:'가수',album:'앨범',albumartist:'앨범 가수',track:'트랙',year:'년도',genre:'장르'};
 function plannedChanges(r){
   ensureDraft(r);const base=originalValues(r),active=r._selection!=='none';
-  const emptyOnly=$('onlyEmpty').checked||r._selection==='auto';
+  const emptyOnly=$('onlyEmpty').checked;
   const candidate=r.candidates?.find(c=>c.id===r._candidateId);
   const changes=tagFields.filter(f=>active&&r._fields.includes(f)&&(!emptyOnly||!base[f])&&String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||'')!==String(base[f]));
   const cover=(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&r._fields.length>0&&!!(candidate.cover_url||candidate.album)));
@@ -571,7 +571,7 @@ function updateSavePreview(){
   if(!r){$('changeSummary').textContent='파일을 선택하면 변경 예정 내용을 표시합니다.';return;}
   const p=plannedChanges(r);
   tagFields.forEach(f=>{$('chg_'+f).style.backgroundColor=p.changes.includes(f)?'var(--blue-light)':'';});
-  $('changeSummary').textContent='현재 곡 변경 예정: '+(p.changes.length?p.changes.map(f=>fieldLabels[f]).join(', '):'텍스트 변경 없음')+` · 커버 ${p.cover?'적용 시도':'유지'} · 가사 ${p.lyrics?'검색 시도':'유지'} · 파일명 ${p.rename?'변경 검사':'유지'} · 식별자 ${p.ids?'검토':'유지'}`+(r._selection==='auto'?' · 자동 후보는 기존 값 보호: 덮어쓰려면 후보를 직접 클릭하거나 입력값을 편집하세요.':'');
+  $('changeSummary').textContent='현재 곡 변경 예정: '+(p.changes.length?p.changes.map(f=>fieldLabels[f]).join(', '):'텍스트 변경 없음')+` · 커버 ${p.cover?'적용 시도':'유지'} · 가사 ${p.lyrics?'검색 시도':'유지'} · 파일명 ${p.rename?'변경 검사':'유지'} · 식별자 ${p.ids?'검토':'유지'}`;
 }
 async function discardDraft(){
   if(!editingResult||saving||searching)return;

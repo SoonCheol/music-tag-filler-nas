@@ -219,10 +219,11 @@ function result(path) {
   $('artistPreference').value='latin';run('refreshCandidatePreference();updateSavePreview()');assert.equal($('chg_artist').value,'Latin');
   $('chg_artist').value='My artist';$('chg_artist').listeners.input();
   $('artistPreference').value='original';run('refreshCandidatePreference();updateSavePreview()');assert.equal($('chg_artist').value,'My artist');
-  // Automatic candidates retain server overwrite protection even when fill-empty is unchecked.
+  // Automatic candidates use the same overwrite option as manual candidates.
   context.autoJob={id:'auto',results:[{...result('auto.mp3'),auto_apply:true,best:{id:'first',title:'First',artist:'Singer'}}]};
-  run('adoptJob(autoJob);toggleTagPreview()');assert.equal($('cur_title').textContent,'Original');
-  assert.match($('changeSummary').textContent,/자동 후보는 기존 값 보호/);
+  run('adoptJob(autoJob);toggleTagPreview()');assert.equal($('cur_title').textContent,'First');
+  $('onlyEmpty').checked=true;run('updateSavePreview()');assert.equal($('cur_title').textContent,'Original');
+  $('onlyEmpty').checked=false;
   context.blankAuto={id:'blank-auto',results:[{path:'blank.mp3',original:{revision:'a'.repeat(64)},auto_apply:true,
     best:{id:'latin-auto',title:'Song',artist:'原文',artist_latin:'Latin'},
     candidates:[{id:'latin-auto',title:'Song',artist:'原文',artist_latin:'Latin'}]}]};
@@ -230,5 +231,23 @@ function result(path) {
   assert.equal($('cur_artist').textContent,'Latin');
   $('artistPreference').value='original';run('refreshCandidatePreference();updateSavePreview()');
   assert.equal($('cur_artist').textContent,'原文');
+  context.bigbang={id:'bigbang',results:[{path:'song.mp3',original:{artist:'빅뱅',title:'Song',revision:'a'.repeat(64)},
+    auto_apply:true,best:{id:'band',artist:'BIGBANG',title:'Song'},candidates:[{id:'band',artist:'BIGBANG',title:'Song'}]}]};
+  for(const automatic of [true,false]){
+    run('adoptJob(bigbang)');
+    if(!automatic)run('applyCandidate(editingResult,editingResult.candidates[0])');
+    if(run('previewPath')!==run('editingResult.path'))run('toggleTagPreview()');
+    const artistCheck=checks.find(c=>c.dataset.field==='artist');
+    for(const emptyOnly of [true,false])for(const checked of [true,false]){
+      $('onlyEmpty').checked=emptyOnly;artistCheck.checked=checked;run('captureCurrent();updateSavePreview()');
+      assert.equal($('cur_artist').textContent,!emptyOnly&&checked?'BIGBANG':'빅뱅');
+      assert.equal($('cur_artist').style.color,!emptyOnly&&checked?'#c62828':'');
+    }
+    artistCheck.checked=true;$('onlyEmpty').checked=false;run('captureCurrent()');
+    $('chg_artist').value='My manual band';$('chg_artist').listeners.input();
+    assert.equal($('cur_artist').textContent,'My manual band');
+    $('onlyEmpty').checked=true;run('updateSavePreview()');
+    $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_artist').textContent,'My manual band');
+  }
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

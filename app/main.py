@@ -510,7 +510,7 @@ def save_one(result, item, request, lyric_context=None):
     elif item.selection == "manual":
         raise storage.StorageError("선택한 후보가 없습니다")
     current = original_tags.read_file(str(path))
-    only_empty = request.only_empty or item.selection == "auto"
+    only_empty = request.only_empty
     values = dict(item.values)
     if item.selection == "auto":
         # The automatic payload cannot substitute untrusted browser values.
