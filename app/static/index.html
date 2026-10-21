@@ -74,6 +74,8 @@ tr.selected{background:var(--blue-light) !important}
 .candidate-thumb{display:flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:32px;padding:0;border:0;border-radius:3px;background:#eef1f5;color:#758196;font-size:20px;cursor:pointer;overflow:hidden}
 .candidate-thumb img{width:32px;height:32px;object-fit:cover;display:block}
 .cand-table td:first-child{white-space:normal;width:220px;min-width:220px}
+.change-cover-wrap{position:relative;width:110px;height:110px}
+#saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;margin:0;z-index:2;accent-color:var(--blue);box-shadow:0 0 0 2px #fff;border-radius:2px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -138,10 +140,10 @@ tr.selected{background:var(--blue-light) !important}
           <div id="tagPreviewNote" hidden>빨간색 글씨는 저장 시 변경될 태그입니다. 미리보기는 실제 파일을 변경하지 않습니다.<br>커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.</div>
         </div>
         <div class="tag-section">
-          <h4><label><input type="checkbox" id="checkAllChange" checked onchange="toggleAllChange(this.checked)"> 변경할 태그 정보</label> <span style="font-weight:400;color:#666;font-size:11px">— 체크된 항목만 저장</span></h4>
+          <h4>변경할 태그 정보 <span style="font-weight:400;color:#666;font-size:11px">— 체크된 항목만 저장</span></h4>
           <div style="display:flex;gap:12px">
             <div style="width:110px;flex-shrink:0">
-              <div class="cover" id="changeCover" title="이미지를 끌어 놓거나 선택하세요"><span>no image</span></div>
+              <div class="change-cover-wrap"><div class="cover" id="changeCover" title="이미지를 끌어 놓거나 선택하세요"><span>no image</span></div><input type="checkbox" id="saveCover" checked aria-label="커버 이미지 저장" title="체크 해제 시 모든 저장에서 기존 커버를 유지합니다"></div>
               <input id="coverFile" type="file" accept="image/*" hidden>
               <div style="display:flex;gap:2px;margin-top:4px"><button class="btn" style="padding:3px;font-size:11px" onclick="$('coverFile').click()">이미지 선택</button><button class="btn" style="padding:3px;font-size:11px" onclick="applyCoverToAll()">전체 적용</button></div>
             </div>
@@ -185,7 +187,7 @@ tr.selected{background:var(--blue-light) !important}
 </div>
 
 <div id="buttonTooltip" class="button-tooltip" role="tooltip" hidden></div>
-<div id="hoverPrev" class="hover-preview"><div id="hoverCoverStatus" role="status"></div><div id="hoverCoverImage"></div><button id="hoverCoverRetry" class="btn" hidden onclick="retryHoverCover()">다시 시도</button></div>
+<div id="hoverPrev" class="hover-preview"><div id="hoverCoverStatus" role="status"></div><div id="hoverCoverImage"></div></div>
 
 <dialog id="saveOptionsDialog" class="options-dialog" aria-labelledby="saveOptionsTitle">
   <form id="saveOptionsForm" onsubmit="applySaveOptions(event)">
@@ -491,7 +493,6 @@ function selectFile(idx){
   $('cur_albumartist').textContent=r.original?.albumartist||'';
   tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
   document.querySelectorAll('.chg-check').forEach(c=>c.checked=r._fields.includes(c.dataset.field));
-  $('checkAllChange').checked=r._fields.length===tagFields.length;
   const best=r.candidates?.find(c=>c.id===r._candidateId);
   invalidateCandidateCover($('changeCover'));
   if(best&&candidateCoverUrl(best,r)&&!($('onlyEmpty').checked&&r.original?.has_cover))paintCandidateCover($('changeCover'),best,r);
@@ -543,13 +544,13 @@ let hoverCoverToken=0,hoverCoverTarget=null,hoverCoverFailed=false;
 function hideHoverCover(){hoverCoverToken++;hoverCoverTarget=null;hoverCoverFailed=false;$('hoverPrev').style.display='none';}
 function showHoverCover(c,r,retry=false){
   const token=++hoverCoverToken,url=candidateCoverUrl(c,r);hoverCoverTarget={c,r};hoverCoverFailed=false;
-  $('hoverPrev').style.display='block';$('hoverCoverImage').replaceChildren();$('hoverCoverRetry').hidden=true;
+  $('hoverPrev').style.display='block';$('hoverCoverImage').replaceChildren();
   $('hoverCoverStatus').textContent=url?'커버 불러오는 중…':'일치하는 커버가 없습니다.';
   if(!url)return;
   requestCandidateCover(c,r,retry,true).then(src=>{
     if(token!==hoverCoverToken)return;
     if(src){const img=document.createElement('img');img.alt='후보 커버';img.src=src;$('hoverCoverStatus').textContent='';$('hoverCoverImage').replaceChildren(img);}
-    else{hoverCoverFailed=true;$('hoverCoverStatus').textContent='커버를 불러오지 못했습니다.';$('hoverCoverRetry').hidden=false;}
+    else{hoverCoverFailed=true;$('hoverCoverStatus').textContent='커버 없음 · 썸네일을 클릭하여 다시 시도하세요.';}
   });
 }
 function retryHoverCover(){if(hoverCoverTarget)showHoverCover(hoverCoverTarget.c,hoverCoverTarget.r,true);}
@@ -563,8 +564,7 @@ function renderCandidates(r){
   r.candidates.forEach((c,i)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`<td><div class="candidate-title"><button type="button" class="candidate-thumb" id="candidateThumb${generation}-${i}" title="커버 미리보기" aria-label="커버 미리보기">♪</button><span class="candidate-name">${esc(c.title)}</span></div></td><td>${esc(c.artist)}</td><td>${esc(c.album)}</td><td>${esc(c.year)}</td><td>${esc(c.source)}</td><td>${c.score}</td>`;
-    tr.onmouseenter=()=>showHoverCover(c,r);
-    tr.onmousemove=(e)=>{
+    const moveHover=(e)=>{
       const hp=$('hoverPrev');
       const imgH=240, pad=12;
       let left=e.clientX+14;
@@ -577,7 +577,6 @@ function renderCandidates(r){
       hp.style.left=left+'px';
       hp.style.top=top+'px';
     };
-    tr.onmouseleave=e=>{if(!hoverCoverFailed&&!$('hoverPrev').contains(e?.relatedTarget))hideHoverCover();};
     tr.onclick=()=>{
       document.querySelectorAll('#candBody tr').forEach(el=>el.classList.remove('selected'));
       tr.classList.add('selected');
@@ -585,7 +584,8 @@ function renderCandidates(r){
     };
     body.appendChild(tr);
     const thumb=$(`candidateThumb${generation}-${i}`);thumbs.push({c,thumb,tr});
-    thumb.onclick=event=>{if(thumb._coverFailed){event.stopPropagation();loadThumb(thumb,c,true);}};
+    thumb.onmouseenter=()=>showHoverCover(c,r);thumb.onmousemove=moveHover;thumb.onmouseleave=hideHoverCover;
+    thumb.onclick=event=>{if(thumb._coverFailed){event.stopPropagation();loadThumb(thumb,c,true);showHoverCover(c,r,true);}};
   });
   function loadThumb(thumb,c,retry=false){
     thumb._coverFailed=false;thumb.title='커버 불러오는 중';
@@ -660,12 +660,13 @@ function renderTagPreview(r){
   }
   if($('currentCover').innerHTML!==html)$('currentCover').innerHTML=html;
 }
+$('saveCover').addEventListener('change',updateSavePreview);
 function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();updateSavePreview();}
 function saveItem(r){
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
-    values:{...r._draft},fields:[...r._fields],include_cover:!!r._coverId||(!!r._candidateId&&r._fields.length>0),cover_id:r._coverId||null,include_ids:$('includeIds').checked};
+    values:{...r._draft},fields:[...r._fields],include_cover:$('saveCover').checked&&(!!r._coverId||(!!r._candidateId&&r._fields.length>0)),cover_id:$('saveCover').checked?r._coverId||null:null,include_ids:$('includeIds').checked};
 }
 function reportSave(res){
   const unchanged=res.unchanged??(res.results||[]).filter(o=>o.reason==='unchanged').length;
@@ -687,7 +688,7 @@ async function submitSave(rows,scope,label){
   if(!paths.length)return alert('저장할 파일이 없습니다');
   let items;try{items=rows.map(saveItem);}catch(e){return alert(e.message);}
   const jobId=currentJobId;
-  const payload={scope,paths,checked_paths:scope==='current'?[]:[...paths],items,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,cover_max_px:Number($('coverMax').value),artist_name_preference:$('artistPreference').value||'original'};
+  const payload={scope,paths,save_cover:$('saveCover').checked,checked_paths:scope==='current'?[]:[...paths],items,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,cover_max_px:Number($('coverMax').value),artist_name_preference:$('artistPreference').value||'original'};
   const message=`${label||(scope==='all'?'작업 전체':'지정한 파일')} ${paths.length}곡 저장?\n${planSummary(rows)}\n빈칸만: ${payload.only_empty?'예':'아니오'} / 파일명 변경: ${payload.rename?'예':'아니오'}`;
   saving=true;updateSavePreview();
   try{
@@ -714,7 +715,7 @@ function plannedChanges(r){
   const emptyOnly=$('onlyEmpty').checked;
   const candidate=r.candidates?.find(c=>c.id===r._candidateId);
   const changes=tagFields.filter(f=>active&&r._fields.includes(f)&&(!emptyOnly||!base[f])&&String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||'')!==String(base[f]));
-  const cover=(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&r._fields.length>0&&!!(candidate.cover_url||candidate.album)));
+  const cover=$('saveCover').checked&&(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&r._fields.length>0&&!!(candidate.cover_url||candidate.album)));
   const final={...base};changes.forEach(f=>final[f]=String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||''));
   const lyrics=active&&$('fillLyrics').checked&&(!String(r.original?.lyrics||'').trim()||r.original?.lyrics_marker)&&!!final.title&&!!final.artist;
   return {changes,cover,lyrics,rename:$('renameFiles').checked,ids:active&&!!candidate&&$('includeIds').checked};

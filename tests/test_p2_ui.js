@@ -27,6 +27,7 @@ function harness() {
       else if(url.endsWith('/save'))value=context.saveResponse||{saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
       return {ok:true,text:async()=>JSON.stringify(value)};
     }});
+  $('saveCover').checked=true;
   vm.runInContext(script,context);
   return {$,calls,context,documentEvents,run:code=>vm.runInContext(code,context)};
 }
@@ -43,8 +44,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   hover.run('showHoverCover(hoverRow.candidates[1],hoverRow)');const imageB=hoverImages.at(-1);
   imageB.onload();await Promise.resolve();imageA.onload();await Promise.resolve();
   assert.equal(hover.$('hoverCoverImage').children[0].src,imageB.src);
-  imageA.onerror();await Promise.resolve();assert.equal(hover.$('hoverCoverRetry').hidden,true);
-  hover.run('showHoverCover(hoverRow.candidates[2],hoverRow)');hoverImages.at(-1).onerror();await Promise.resolve();assert.equal(hover.$('hoverCoverRetry').hidden,false);
+  imageA.onerror();await Promise.resolve();assert.equal(hover.$('hoverCoverStatus').textContent,'');
+  hover.run('showHoverCover(hoverRow.candidates[2],hoverRow)');hoverImages.at(-1).onerror();await Promise.resolve();assert.ok(hover.$('hoverCoverStatus').textContent.includes('썸네일'));
   hover.run('retryHoverCover()');const retried=hoverImages.at(-1);assert.ok(retried.src.includes('retry='));retried.onload();await Promise.resolve();assert.equal(hover.$('hoverCoverStatus').textContent,'');
   hover.run('hideHoverCover()');assert.equal(hover.$('hoverPrev').style.display,'none');
   const thumbnails=harness(),thumbImages=[];
@@ -76,6 +77,16 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const icon=failedThumb.$('candidateThumb1-0');assert.equal(icon.innerHTML,'♪');assert.equal(icon._coverFailed,true);
   let stopped=false;icon.onclick({stopPropagation(){stopped=true;}});assert.equal(stopped,true);assert.ok(failedImages.at(-1).src.includes('retry='));
   failedImages.at(-1).onload();await Promise.resolve();assert.equal(icon._coverFailed,false);assert.ok(icon.innerHTML.includes('<img'));
+  assert.ok(!html.includes('id="checkAllChange"'));
+  assert.ok(html.includes('id="saveCover" checked aria-label="커버 이미지 저장"'));
+  assert.ok(html.includes('#saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;'));
+  const hoverOnly=harness();
+  hoverOnly.context.row={path:'test.mp3',candidates:[{id:'one',album:'Album'}]};
+  hoverOnly.run("currentJobId='thumb-only';renderCandidates(row)");
+  const candidateRow=hoverOnly.$('candBody').children.at(-1),thumbnail=hoverOnly.$('candidateThumb1-0');
+  assert.equal(candidateRow.onmouseenter,undefined);assert.equal(candidateRow.onmousemove,undefined);assert.equal(typeof candidateRow.onclick,'function');
+  thumbnail.onmouseenter();assert.equal(hoverOnly.$('hoverPrev').style.display,'block');
+  thumbnail.onmouseleave();assert.equal(hoverOnly.$('hoverPrev').style.display,'none');
   const common=harness();
   common.context.commonJob={id:'common-fields',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',album:'Dance CD1',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'auto',original:{title:'Two',album:'Dance CD2',revision:'a'.repeat(64)}}]};
   common.run('adoptJob(commonJob)');
@@ -86,6 +97,14 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(common.run('editingResult.path'),'two.mp3');
   assert.equal(common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked,false);
   assert.equal(common.run("currentResults.every(r=>!saveItem(r).fields.includes('album'))"),true);
+  common.run("editingResult._coverId='uploaded-token'");common.$('saveCover').checked=false;common.$('saveCover').listeners.change();
+  assert.equal(common.run('saveItem(editingResult).include_cover'),false);assert.equal(common.run('saveItem(editingResult).cover_id'),null);assert.equal(common.run('plannedChanges(editingResult).cover'),false);
+  common.run('editingResult._coverId=null');await common.run('requestSelectFile(0)');assert.equal(common.$('actionDialog').open,undefined);
+  assert.equal(common.$('saveCover').checked,false);await common.run('requestSelectFile(1)');
+  common.run('currentResults.forEach(r=>r._checked=true)');
+  const withoutCovers=common.run('saveSelected()');common.run('resolveAction(true)');await withoutCovers;
+  const coverRequest=common.calls.filter(c=>c.url.endsWith('/save')).at(-1).body;
+  assert.equal(coverRequest.save_cover,false);assert.ok(coverRequest.items.every(i=>!i.include_cover&&i.cover_id===null));
   common.$('chg_title').value='Unsaved edit';common.$('chg_title').listeners.input();
   const stay=common.run('requestSelectFile(0)');assert.equal(common.$('actionTitle').textContent,'미저장 변경사항');
   assert.equal(common.$('actionAccept').textContent,'버리고 이동');assert.equal(common.$('actionCancel').textContent,'계속 편집');

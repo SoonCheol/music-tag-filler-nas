@@ -445,3 +445,46 @@ class P2Tests(unittest.TestCase):
                         info=storage.describe(path)
                         self.assertEqual(info['album'],'Original album')
                         self.assertEqual(info['genre'],'New genre')
+
+    def test_cover_disabled_preserves_existing_and_missing_covers_for_every_scope(self):
+        for scope in ('current','selected','all'):
+            for blank in (False,True):
+                for source in ('candidate','uploaded'):
+                    with self.subTest(scope=scope,blank=blank,source=source):
+                        paths=[self.copy(scope+'-'+str(blank)+'-'+source+'-'+str(i)+'.mp3',blank=blank) for i in range(1 if scope=='current' else 2)]
+                        before=[p0.tags.read_cover(str(path)) for path in paths]
+                        rows=self.job(paths)
+                        token=preferences.put_cover('test',p0.image_bytes('blue')) if source=='uploaded' else None
+                        items=[self.item(row,selection='manual',candidate_id=main.candidate_id(row['candidates'][0]),include_cover=True,cover_id=token) for row in rows]
+                        with patch.object(search_service,'fetch_cover',side_effect=AssertionError('cover download must be disabled')):
+                            result=self.http(self.request(items,scope=scope,save_cover=False,only_empty=False))
+                        self.assertEqual(result['failed'],0)
+                        self.assertEqual(result['saved'],len(paths))
+                        self.assertEqual(before,[p0.tags.read_cover(str(path)) for path in paths])
+
+    def test_disabled_uploaded_cover_without_tag_changes_does_not_touch_file(self):
+        path=self.copy()
+        row=self.job([path])[0]
+        before=path.read_bytes(),path.stat().st_mtime_ns
+        token=preferences.put_cover('test',p0.image_bytes('blue'))
+        item=self.item(row,selection='edit',values={'title':'Original song'},fields=['title'],cover_id=token,include_cover=True)
+        outcome=self.http(self.request([item],save_cover=False,only_empty=False))
+        self.assertEqual(outcome['unchanged'],1)
+        self.assertEqual(before,(path.read_bytes(),path.stat().st_mtime_ns))
+
+    def test_cover_enabled_keeps_fill_empty_rule(self):
+        for blank in (False,True):
+            for only_empty in (False,True):
+                for source in ('candidate','uploaded'):
+                    with self.subTest(blank=blank,only_empty=only_empty,source=source):
+                        path=self.copy('enabled-'+str(blank)+'-'+str(only_empty)+'-'+source+'.mp3',blank=blank)
+                        row=self.job([path])[0]
+                        before=p0.tags.read_cover(str(path))
+                        token=preferences.put_cover('test',p0.image_bytes('blue')) if source=='uploaded' else None
+                        item=self.item(row,selection='manual',candidate_id=main.candidate_id(row['candidates'][0]),fields=[],values={},cover_id=token,include_cover=True)
+                        with patch.object(search_service,'fetch_cover',return_value=(p0.image_bytes('blue'),[])):
+                            result=self.http(self.request([item],only_empty=only_empty))
+                        self.assertEqual(result['failed'],0)
+                        after=p0.tags.read_cover(str(path))
+                        if only_empty and not blank:self.assertEqual(before,after)
+                        else:self.assertTrue(after[0]);self.assertNotEqual(before,after)

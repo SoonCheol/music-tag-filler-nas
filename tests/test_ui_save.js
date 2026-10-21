@@ -19,6 +19,7 @@ function $(id) { if (!elements.has(id)) elements.set(id, element()); return elem
 for (const field of ['title', 'artist', 'album', 'albumartist', 'track', 'year', 'genre']) {
   const check = element(); check.checked = true; check.dataset = { field }; checks.push(check);
 }
+$('saveCover').checked=true;
 $('onlyEmpty').checked = false;$('coverMax').value=1000;
 const context = vm.createContext({ console, Set, Map, encodeURIComponent,
   document: { getElementById: $, createElement: element, addEventListener() {},
@@ -196,7 +197,7 @@ function result(path) {
   run('toggleTagPreview();selectFile(1)');assert.equal($('btnApplyCandidate').textContent,'미리보기');
   assert.equal($('tagPreviewLabel').hidden,true);
   assert(!html.includes('>선택 적용</button>'));assert(!html.includes('onclick="applySelectedCandidate()"'));
-  const currentSection=html.slice(html.indexOf('<h4>현재 태그 정보'),html.indexOf('<h4><label>'));
+  const currentSection=html.slice(html.indexOf('<h4>현재 태그 정보'),html.indexOf('<h4>변경할 태그 정보'));
   assert(!currentSection.includes('<input'));assert(!currentSection.includes('저장 전'));
   // Regression: selecting with fill-empty on must retain candidate values for later overwrite.
   $('fileFilter').value='';$('onlyEmpty').checked=true;run('adoptJob(previewJob)');

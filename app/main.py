@@ -356,6 +356,7 @@ class SaveRequest(BaseModel):
     paths: List[str]
     checked_paths: List[str] = Field(default_factory=list)
     items: List[SaveItem]
+    save_cover: bool = True
     only_empty: bool = True
     fill_lyrics: bool = False
     rename: bool = False
@@ -559,9 +560,9 @@ def save_one(result, item, request, lyric_context=None):
             ids.mb_album_id = ""
         if not artist_matches or not matches("title", "title", model.title):
             ids.mb_recording_id = ""
-    wants_cover = bool(item.include_cover and candidate and (candidate.get("cover_url") or candidate.get("album"))
+    wants_cover = bool(request.save_cover and item.include_cover and candidate and (candidate.get("cover_url") or candidate.get("album"))
                        and not (only_empty and current.cover is not None))
-    uploaded = preferences.get_cover(result.get("job_id", ""), item.cover_id) if item.cover_id else None
+    uploaded = preferences.get_cover(result.get("job_id", ""), item.cover_id) if request.save_cover and item.cover_id else None
     if uploaded is not None:
         wants_cover = not (only_empty and current.cover is not None)
     has_real_lyrics = bool(current.lyrics.strip() and not original_lyrics.marker_only(current.lyrics))
