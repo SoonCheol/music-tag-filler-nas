@@ -81,6 +81,13 @@ tr.selected{background:var(--blue-light) !important}
 .tag-grid:not(.no-check)>label{display:flex;align-items:center;justify-content:flex-end}
 .chg-check{margin:0;width:14px;height:14px}
 .job-title{min-width:0;overflow-wrap:anywhere}.job .badge{flex-shrink:0}
+.file-name-cell{padding-top:3px;padding-bottom:3px}
+.file-name-content{display:flex;align-items:center;gap:6px;min-width:0}
+.file-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audio-preview-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:#f8f9fa;color:#374151;font-size:12px;cursor:pointer}
+.audio-preview-button:hover:not(:disabled){background:#e8f0fe;border-color:#9cb9ed}
+.audio-preview-button.playing{color:#2b6de5;background:#e8f0fe}
+.audio-preview-button:disabled{opacity:.4;cursor:default}
 </style>
 </head>
 <body>
@@ -191,6 +198,7 @@ tr.selected{background:var(--blue-light) !important}
   </div>
 </div>
 
+<audio id="previewAudio" preload="none" hidden></audio>
 <div id="buttonTooltip" class="button-tooltip" role="tooltip" hidden></div>
 <div id="hoverPrev" class="hover-preview"><div id="hoverCoverStatus" role="status"></div><div id="hoverCoverImage"></div></div>
 
@@ -470,13 +478,46 @@ async function requestSelectFile(idx){
   const r=filteredResults[idx];if(!r||r===editingResult)return;
   if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
 }
+const previewAudio=$('previewAudio');
+let playingPath=null,audioPlaying=false,audioRequest=0;
+const audioUnavailable=new Set();
+function audioMime(path){return {mp3:'audio/mpeg',flac:'audio/flac',m4a:'audio/mp4',ogg:'audio/ogg'}[(path.split('.').pop()||'').toLowerCase()]||'';}
+function canPreviewAudio(path){const mime=audioMime(path);return !!mime&&typeof previewAudio.canPlayType==='function'&&!!previewAudio.canPlayType(mime)&&!audioUnavailable.has(path);}
+function audioButton(path,index){
+  const playing=playingPath===path&&audioPlaying,label=playing?'일시정지':'재생';
+  return `<button type="button" class="audio-preview-button${playing?' playing':''}" data-audio-path="${esc(path)}" ${canPreviewAudio(path)?'':'disabled'} title="${canPreviewAudio(path)?label:'브라우저에서 재생할 수 없는 파일'}" aria-label="${label}: ${esc(path)}" onclick="event.stopPropagation();toggleAudio(${index})">${playing?'⏸':'▶'}</button>`;
+}
+function updateAudioButtons(){
+  document.querySelectorAll('[data-audio-path]').forEach(button=>{
+    const path=button.getAttribute('data-audio-path'),playing=path===playingPath&&audioPlaying,label=playing?'일시정지':'재생';
+    button.textContent=playing?'⏸':'▶';button.className='audio-preview-button'+(playing?' playing':'');
+    button.disabled=!canPreviewAudio(path);button.title=button.disabled?'브라우저에서 재생할 수 없는 파일':label;button.setAttribute('aria-label',label+': '+path);
+  });
+}
+async function toggleAudio(index){
+  const row=filteredResults[index];if(!row||!canPreviewAudio(row.path))return;
+  const path=row.path;
+  if(playingPath===path&&!previewAudio.paused){previewAudio.pause();audioPlaying=false;updateAudioButtons();return;}
+  const token=++audioRequest;
+  if(playingPath!==path||previewAudio.error){previewAudio.pause();audioPlaying=false;playingPath=path;previewAudio.src='/api/audio/'+encodeURIComponent(path);previewAudio.load();}
+  try{await previewAudio.play();if(token===audioRequest)updateAudioButtons();}
+  catch(error){if(token!==audioRequest||error.name==='AbortError')return;if(error.name==='NotSupportedError')audioUnavailable.add(path);audioPlaying=false;previewAudio.pause();updateAudioButtons();}
+}
+previewAudio.addEventListener('playing',()=>{audioPlaying=true;updateAudioButtons();});
+previewAudio.addEventListener('pause',()=>{audioPlaying=false;updateAudioButtons();});
+previewAudio.addEventListener('ended',()=>{audioPlaying=false;playingPath=null;updateAudioButtons();});
+previewAudio.addEventListener('error',()=>{
+  if(previewAudio.currentSrc&&previewAudio.currentSrc!==previewAudio.src)return;
+  if(playingPath&&[3,4].includes(previewAudio.error?.code))audioUnavailable.add(playingPath);
+  audioPlaying=false;previewAudio.pause();updateAudioButtons();
+});
 function renderFileList(){
   sanitizeChecks();const body=$('fileBody'),scroller=$('fileListScroller'),scrollTop=scroller.scrollTop;
   if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
   body.innerHTML='';filteredResults.forEach((r,i)=>{
     const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장완료'}[state];
     const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';
-    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="file-state file-state-${state}">${status}</span></td>`;
+    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td class="file-name-cell" title="${esc(r.path)}"><div class="file-name-content">${audioButton(r.path,i)}<span class="file-name-text">${esc(r.path.split('/').pop())}</span></div></td><td><span class="file-state file-state-${state}">${status}</span></td>`;
     tr.onclick=()=>requestSelectFile(i);body.appendChild(tr);
   });updateSavePreview();scroller.scrollTop=scrollTop;
 }

@@ -6,6 +6,7 @@ import threading
 import unittest
 from unittest.mock import patch
 import urllib.request
+import urllib.parse
 import urllib.error
 from fastapi import BackgroundTasks, HTTPException
 import test_p0_storage as p0
@@ -490,3 +491,31 @@ class P2Tests(unittest.TestCase):
                         after=p0.tags.read_cover(str(path))
                         if only_empty and not blank:self.assertEqual(before,after)
                         else:self.assertTrue(after[0]);self.assertNotEqual(before,after)
+
+    def test_audio_stream_ranges_head_and_read_only(self):
+        def stream(path,range_value=None,method='GET'):
+            request=urllib.request.Request('http://127.0.0.1:'+str(self.port)+'/api/audio/'+urllib.parse.quote(path,safe=''),method=method,headers={'Range':range_value} if range_value else {})
+            try:response=urllib.request.urlopen(request,timeout=3)
+            except urllib.error.HTTPError as exc:response=exc
+            with response:return response.code,dict(response.headers),response.read()
+        for ext,mime in [('mp3','audio/mpeg'),('flac','audio/flac'),('m4a','audio/mp4'),('ogg','audio/ogg')]:
+            path=self.copy('stream.'+ext);before=path.read_bytes(),path.stat().st_mtime_ns
+            code,headers,data=stream(path.name)
+            self.assertEqual(code,200);self.assertEqual(data,before[0]);self.assertEqual(headers['content-type'],mime)
+            self.assertEqual(headers['accept-ranges'],'bytes')
+            for value,start,end in [('bytes=0-15',0,15),('bytes=20-',20,len(data)-1),('bytes=-12',len(data)-12,len(data)-1),('bytes=0-999999',0,len(data)-1)]:
+                code,h,part=stream(path.name,value);self.assertEqual(code,206);self.assertEqual(part,data[start:end+1]);self.assertEqual(h['content-range'],f'bytes {start}-{end}/{len(data)}')
+            for value in ['bytes=999999-','bytes=12-2','bytes=-0','bytes=','bytes=0-1,3-4','bytes='+'9'*200+'-']:
+                code,h,_=stream(path.name,value);self.assertEqual(code,416);self.assertEqual(h['content-range'],f'bytes */{len(data)}')
+            code,h,body=stream(path.name,'bytes=0-15','HEAD');self.assertEqual(code,206);self.assertEqual(body,b'');self.assertEqual(h['content-length'],'16')
+            self.assertEqual(before,(path.read_bytes(),path.stat().st_mtime_ns))
+
+    def test_audio_stream_rejects_escape_unsupported_and_symlink(self):
+        valid=self.copy()
+        (self.root/'bad.txt').write_text('not audio')
+        (self.root/'linked.mp3').symlink_to(valid)
+        for path in ['../outside.mp3',str(valid.resolve()),'missing.mp3','bad.txt','linked.mp3']:
+            request=urllib.request.Request('http://127.0.0.1:'+str(self.port)+'/api/audio/'+urllib.parse.quote(path,safe=''))
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request)
+            self.assertEqual(error.exception.code,400)

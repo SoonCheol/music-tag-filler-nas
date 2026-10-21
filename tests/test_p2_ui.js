@@ -27,6 +27,10 @@ function harness() {
       else if(url.endsWith('/save'))value=context.saveResponse||{saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
       return {ok:true,text:async()=>JSON.stringify(value)};
     }});
+  Object.assign($('previewAudio'),{paused:true,ended:false,currentTime:0,loads:0,plays:0,canPlayType:()=> 'probably',
+    load(){this.loads++;this.currentTime=0;this.currentSrc=this.src;this.ended=false;},
+    pause(){this.paused=true;this.listeners.pause?.();},
+    async play(){this.plays++;this.paused=false;this.currentSrc=this.src;this.listeners.playing?.();}});
   $('saveCover').checked=true;
   vm.runInContext(script,context);
   return {$,calls,context,documentEvents,run:code=>vm.runInContext(code,context)};
@@ -34,6 +38,22 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  const playback=harness();
+  playback.context.audioJob={id:'preview',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'review',original:{title:'Two',revision:'a'.repeat(64)}}]};
+  playback.run('adoptJob(audioJob)');const audio=playback.$('previewAudio');
+  playback.$('fileListScroller').scrollTop=130;
+  await playback.run('toggleAudio(0)');assert.equal(audio.paused,false);assert.equal(playback.run('audioPlaying'),true);assert.equal(playback.run('editingResult.path'),'one.mp3');
+  audio.currentTime=4.2;await playback.run('toggleAudio(0)');assert.equal(audio.paused,true);assert.equal(audio.currentTime,4.2);
+  await playback.run('toggleAudio(0)');assert.equal(audio.paused,false);assert.equal(audio.currentTime,4.2);assert.equal(audio.loads,1);
+  playback.run('selectFile(1)');playback.$('chg_title').value='Only editor changed';playback.$('chg_title').listeners.input();
+  assert.equal(audio.paused,false);assert.equal(playback.run('playingPath'),'one.mp3');assert.equal(playback.$('fileListScroller').scrollTop,130);
+  await playback.run('toggleAudio(1)');assert.equal(playback.run('playingPath'),'two.mp3');assert.equal(audio.currentTime,0);assert.equal(audio.loads,2);
+  audio.listeners.ended();assert.equal(playback.run('audioPlaying'),false);assert.equal(playback.run('playingPath'),null);
+  await playback.run('toggleAudio(0)');audio.error={code:4};audio.listeners.error();assert.equal(playback.run('audioPlaying'),false);assert.equal(playback.run("canPreviewAudio('one.mp3')"),false);
+  audio.canPlayType=()=>'';assert.equal(playback.run("canPreviewAudio('two.mp3')"),false);
+  assert.ok(html.includes('event.stopPropagation();toggleAudio('));assert.ok(html.includes('width:24px;height:24px;'));
+  assert.ok(html.includes('id="previewAudio" preload="none" hidden'));
+
   const hover=harness(),hoverImages=[];
   const create=hover.context.document.createElement;
   hover.context.document.createElement=tag=>{const node=create(tag);if(tag==='img')hoverImages.push(node);return node;};

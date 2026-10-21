@@ -4,7 +4,9 @@ from typing import List, Dict, Optional, Literal
 import requests, musicbrainzngs
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, ConfigDict
 import mutagen
 from functools import wraps
@@ -727,6 +729,60 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
         except OSError as exc:
             response["state_error"] = "파일 처리 결과는 위와 같으나 작업 상태 기록 실패: " + str(exc)
         return response
+
+
+@app.api_route("/api/audio/{path:path}", methods=["GET", "HEAD"])
+def stream_audio(path: str, request: Request):
+    source = None
+    try:
+        target = storage.resolve_music(MUSIC_ROOT, path)
+        source = target.open("rb")
+        size = os.fstat(source.fileno()).st_size
+    except (storage.StorageError, OSError) as exc:
+        if source is not None:
+            source.close()
+        raise HTTPException(400, str(exc))
+    start, end, status = 0, size - 1, 200
+    range_header = None if request.headers.get("if-range") else request.headers.get("range")
+    if range_header:
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if len(range_header)>128 or not match or not any(match.groups()) or size == 0:
+            source.close()
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"})
+        first, last = match.groups()
+        if first:
+            start = int(first)
+            end = min(int(last), size - 1) if last else size - 1
+        else:
+            suffix = int(last)
+            start, end = max(0, size - suffix), size - 1
+        if start >= size or end < start:
+            source.close()
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"})
+        status = 206
+    length = max(0, end - start + 1)
+    headers = {"Accept-Ranges": "bytes", "Content-Length": str(length),
+               "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    media_type = {".mp3": "audio/mpeg", ".flac": "audio/flac", ".m4a": "audio/mp4", ".ogg": "audio/ogg"}[target.suffix.lower()]
+    if request.method == "HEAD":
+        source.close()
+        return Response(status_code=status, headers=headers, media_type=media_type)
+
+    async def chunks():
+        try:
+            source.seek(start)
+            remaining = length
+            while remaining:
+                data = await run_in_threadpool(source.read, min(65536, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+        finally:
+            source.close()
+    return StreamingResponse(chunks(), status_code=status, headers=headers, media_type=media_type, background=BackgroundTask(source.close))
 
 
 @app.get("/api/files/{path:path}")
