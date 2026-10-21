@@ -54,7 +54,7 @@ CI는 검증만 하며 NAS에 접속하지 않는다.
 ## NAS 배포와 복구
 
 정식 이름 이전 작업은 docs/V1_REGISTRATION_STATUS.md를 먼저 확인한다.
-현재 고정 스택·컨테이너·서비스 이름은 music-tag-filler, 이미지는 music-tag-filler-nas:v1.0.0이다.
+현재 고정 스택·컨테이너·서비스 이름은 music-tag-filler, 이미지는 music-tag-filler-nas:v2.0.0이다.
 2026-10-21 Portainer 공식 API로 이전 완료했다. 스택 ID 32와 관리자 전용 접근 제어를 보존했다.
 이후에는 고정 이름을 유지하고 이미지 버전 태그만 갱신한다. NAS 호스트 경로는 바꾸지 않는다.
 

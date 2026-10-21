@@ -53,7 +53,7 @@ ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "d
 ```powershell
 ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "mkdir -p /volume3/docker3/music-tag-filler-v6/data"
 scp -O -r -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes app Dockerfile requirements.txt requirements.lock.txt .dockerignore portainer-stack.yml hitmyhead@192.168.0.100:/volume3/docker3/music-tag-filler-v6/
-ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "cd /volume3/docker3/music-tag-filler-v6 && docker build -t music-tag-filler-nas:v1.0.0 ."
+ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "cd /volume3/docker3/music-tag-filler-v6 && docker build -t music-tag-filler-nas:v2.0.0 ."
 ```
 
 `scp -O`는 기존에 검증된 legacy SCP 방식이다. 개인키·로컬 JSON·Git 메타데이터·음악은 전송하지 않는다.

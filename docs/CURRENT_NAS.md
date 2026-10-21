@@ -13,8 +13,8 @@
 | 음악 | `/volume1/Multimedia/Music` → `/music:rw` |
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
-| 이미지 | `music-tag-filler-nas:v1.0.0` |
-| 이미지 ID | `sha256:814278cb46c9676b838daf61d5218eaf8868381dc8db4c821a162f95c5fd29a7` |
+| 이미지 | `music-tag-filler-nas:v2.0.0` |
+| 이미지 ID | `sha256:0700ac35664652332f0a144c5196a211b3429fbdaf13cfc415017f0823e56b9c` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -39,7 +39,7 @@ Portainer 스택 ID는 새 NAS에서 달라질 수 있으므로 실제 경로를
   "NasTarget": "hitmyhead@192.168.0.100",
   "SshKey": "C:\\Users\\homes\\.ssh\\codex_nas",
   "RemoteRoot": "/volume3/docker3/music-tag-filler-v6",
-  "Image": "music-tag-filler-nas:v1.0.0",
+  "Image": "music-tag-filler-nas:v2.0.0",
   "Container": "music-tag-filler",
   "PortainerStackFile": "/data/compose/32/docker-compose.yml",
   "WebBaseUrl": "http://192.168.0.100:8000",
@@ -71,7 +71,7 @@ AcoustID 키 미설정과 기존 보안 공지 제한은 [보안 보고서](SECU
 
 기존 deploy-nas.ps1 및 local JSON으로 UI 변경을 배포했다. 스택/컨테이너 이름과
 마운트·환경·포트·권한은 기존 검사를 통과했다. 기존 이미지 태그를 사용해 재빌드했으며
-상단 이미지 ID가 이번 실행 이미지다. GitHub v1.0.0 태그/Release와 HEAD dce4018은 변경하지 않았다.
+위 과거 검사 기록의 이미지와 현재 상단 이미지 ID는 다르다. GitHub v1.0.0 태그/Release와 HEAD dce4018은 변경하지 않았다.
 소스는 미커밋 작업본이다. 이전 릴리스 이미지 ID는 V1_REGISTRATION_STATUS.md의 역사적 기록을 따른다.
 백업: /volume3/docker3/music-tag-filler-v6/deploy-backups/20261021-061358-dac02e5b.
 웹 HTTP 200, 운영 HTML과 로컬 HTML 바이트 일치, 폴더 API 및 실제 브라우저 UI 표시 확인.

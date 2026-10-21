@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>음악 정보 채우기 - NAS</title>
+<title>음악 정보 채우기 - NAS v2.0.0</title>
 <style>
 :root{--bg:#f2f3f5;--card:#fff;--line:#d0d3d8;--line2:#e6e8eb;--blue:#2b6de5;--blue-light:#e8f0fe;--text:#222;--muted:#6b7280}
 *{box-sizing:border-box}
@@ -93,7 +93,7 @@ tr.selected{background:var(--blue-light) !important}
 <body>
 <div class="header">
   <div>
-    <h1>음악 정보 채우기</h1>
+    <h1>음악 정보 채우기 <small style="font-size:13px;font-weight:normal">v2.0.0</small></h1>
   </div>
 </div>
 
@@ -121,7 +121,7 @@ tr.selected{background:var(--blue-light) !important}
     </div>
     <div class="table-wrap" id="fileListScroller">
       <table>
-        <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th id="fileNameHeader" aria-sort="none"><button class="sort-heading" id="sortFileName" onclick="sortFiles('name')">파일명</button></th><th id="fileStateHeader" aria-sort="none" style="width:85px"><button class="sort-heading" id="sortFileState" onclick="sortFiles('state')">상태</button></th></tr></thead>
+        <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th id="fileNameHeader" aria-sort="none"><div style="display:flex;align-items:center;gap:8px"><button type="button" id="headerAudio" class="audio-preview-button" disabled title="먼저 파일의 재생 버튼을 눌러 주세요" aria-label="현재 음악 재생" onclick="event.stopPropagation();toggleHeaderAudio()">▶</button><button class="sort-heading" id="sortFileName" onclick="sortFiles('name')">파일명</button></div></th><th id="fileStateHeader" aria-sort="none" style="width:85px"><button class="sort-heading" id="sortFileState" onclick="sortFiles('state')">상태</button></th></tr></thead>
         <tbody id="fileBody"><tr><td colspan="4" style="text-align:center;padding:30px;color:#999">스캔을 시작하세요</td></tr></tbody>
       </table>
     </div>
@@ -488,11 +488,23 @@ function audioButton(path,index){
   return `<button type="button" class="audio-preview-button${playing?' playing':''}" data-audio-path="${esc(path)}" ${canPreviewAudio(path)?'':'disabled'} title="${canPreviewAudio(path)?label:'브라우저에서 재생할 수 없는 파일'}" aria-label="${label}: ${esc(path)}" onclick="event.stopPropagation();toggleAudio(${index})">${playing?'⏸':'▶'}</button>`;
 }
 function updateAudioButtons(){
+  const header=$('headerAudio'),label=audioPlaying?'일시정지':'이어서 재생';
+  header.textContent=audioPlaying?'⏸':'▶';header.className='audio-preview-button'+(audioPlaying?' playing':'');
+  header.disabled=!playingPath||!canPreviewAudio(playingPath);
+  header.title=header.disabled?'먼저 파일의 재생 버튼을 눌러 주세요':label+': '+playingPath;
+  header.setAttribute('aria-label',header.disabled?'현재 음악 재생':label+': '+playingPath);
   document.querySelectorAll('[data-audio-path]').forEach(button=>{
     const path=button.getAttribute('data-audio-path'),playing=path===playingPath&&audioPlaying,label=playing?'일시정지':'재생';
     button.textContent=playing?'⏸':'▶';button.className='audio-preview-button'+(playing?' playing':'');
     button.disabled=!canPreviewAudio(path);button.title=button.disabled?'브라우저에서 재생할 수 없는 파일':label;button.setAttribute('aria-label',label+': '+path);
   });
+}
+async function toggleHeaderAudio(){
+  if(!playingPath||!canPreviewAudio(playingPath))return;
+  if(!previewAudio.paused){++audioRequest;previewAudio.pause();return;}
+  const path=playingPath,token=++audioRequest;
+  try{await previewAudio.play();if(token===audioRequest)updateAudioButtons();}
+  catch(error){if(token!==audioRequest||error.name==='AbortError')return;if(error.name==='NotSupportedError')audioUnavailable.add(path);audioPlaying=false;previewAudio.pause();updateAudioButtons();}
 }
 async function toggleAudio(index){
   const row=filteredResults[index];if(!row||!canPreviewAudio(row.path))return;

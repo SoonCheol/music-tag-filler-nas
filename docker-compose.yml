@@ -2,7 +2,7 @@
 # docker compose -p music-tag-filler up -d --no-build --pull never
 services:
   music-tag-filler:
-    image: music-tag-filler-nas:v1.0.0
+    image: music-tag-filler-nas:v2.0.0
     container_name: music-tag-filler
     ports:
       - "8000:8000"

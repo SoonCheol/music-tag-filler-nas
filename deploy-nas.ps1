@@ -3,6 +3,8 @@
 param(
     [switch]$Redeploy,
     [switch]$BuildOnly,
+    # Build a new version without changing the running image or stack.
+    [string]$BuildImage,
     # Optional override; otherwise read the discovered existing Portainer stack.
     [string]$RemoteComposeFile,
     [switch]$CheckOnly,
@@ -167,6 +169,13 @@ $nasTarget = $deployConfig.NasTarget
 $sshKey = $deployConfig.SshKey
 $remoteRoot = $deployConfig.RemoteRoot
 $image = $deployConfig.Image
+$buildImageTag = $image
+if ($BuildImage) {
+    if (!$BuildOnly -or $BuildImage -notmatch '^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*$' -or ($BuildImage -split ':')[0] -ne ($image -split ':')[0]) {
+        throw 'BuildImage requires BuildOnly and a version tag in the same image repository.'
+    }
+    $buildImageTag = $BuildImage
+}
 $container = $deployConfig.Container
 $portainerStackFile = $deployConfig.PortainerStackFile
 $webBaseUrl = $deployConfig.WebBaseUrl
@@ -226,7 +235,7 @@ try {
             if ($remoteHash -ne (Get-LocalHash (Join-Path $projectRoot $file))) { throw "Upload hash mismatch: $file" }
         }
     }
-    Invoke-Nas "cd '$remoteRoot' && docker build -t $image ."
+    Invoke-Nas "cd '$remoteRoot' && docker build -t $buildImageTag ."
     if (!$doRedeploy) { Write-Host 'Image built. Container and stack unchanged.'; return }
 
     # Check new image defaults too: dependency/base-image updates must not alter settings silently.

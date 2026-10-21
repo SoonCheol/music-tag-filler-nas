@@ -44,7 +44,7 @@ docker stop music-tag-filler
 docker cp music-tag-filler:/data - > data.tar
 docker inspect music-tag-filler > container-inspect.json
 docker cp portainer:/data/compose/32/docker-compose.yml - > portainer-definition.tar
-docker image save -o image.tar music-tag-filler-nas:v1.0.0
+docker image save -o image.tar music-tag-filler-nas:v2.0.0
 sha256sum data.tar image.tar container-inspect.json portainer-definition.tar > SHA256SUMS
 sha256sum -c SHA256SUMS
 tar -tf data.tar | head -20

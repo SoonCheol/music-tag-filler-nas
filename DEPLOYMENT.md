@@ -120,3 +120,4 @@ not a guarantee that every historical version is free of personal information.
 항목이 없는 이전 설정은 true로 처리되며 실제 모드가 다르면 배포를 중단한다.
 배포는 마운트 모드를 자동 변경하지 않고 현재 승인된 설정만 보존한다.
 기존 문서의 ro 설명은 전환 이전 기록이며 [전환 검증](docs/RW_MOUNT_VALIDATION.md)을 따른다.
+새 버전 이미지만 검증할 때는 `-BuildOnly -BuildImage music-tag-filler-nas:v2.0.0`을 사용합니다. 현재 설정의 기존 이미지·마운트를 검사하고 새 태그로 빌드하며 운영 컨테이너와 Portainer 정의는 변경하지 않습니다. 검증 뒤 Portainer 원본 정의의 이미지 항목과 로컬 JSON을 함께 갱신합니다.

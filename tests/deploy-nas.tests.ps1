@@ -108,3 +108,20 @@ try {
 } finally {
     Remove-Item -LiteralPath $fixturePath -ErrorAction SilentlyContinue
 }
+
+# Exercise the new-version build guard without SSH or a real build.
+$guard = $ast.Find({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.StartsWith('if ($BuildImage) {')}, $true)
+if (!$guard) { throw 'BuildImage guard missing.' }
+$guardBlock = [scriptblock]::Create($guard.Extent.Text)
+foreach ($case in @(
+    @{ Tag='music-tag-filler-nas:v2.0.0'; Only=$true; Accept=$true },
+    @{ Tag='music-tag-filler-nas:v2.0.0'; Only=$false; Accept=$false },
+    @{ Tag='other:v2.0.0'; Only=$true; Accept=$false },
+    @{ Tag='music-tag-filler-nas:v2.0.0;echo'; Only=$true; Accept=$false }
+)) {
+    $BuildImage=$case.Tag; $BuildOnly=$case.Only; $buildImageTag=$image; $accepted=$true
+    try { . $guardBlock } catch { $accepted=$false }
+    if ($accepted -ne $case.Accept) { throw 'Incorrect BuildImage validation.' }
+    if ($accepted -and $buildImageTag -ne $BuildImage) { throw 'BuildImage not selected.' }
+}
+Write-Host 'PASS: new-version build accepted; recreation, other repository and unsafe tag rejected.'

@@ -42,9 +42,18 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   playback.context.audioJob={id:'preview',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'review',original:{title:'Two',revision:'a'.repeat(64)}}]};
   playback.run('adoptJob(audioJob)');const audio=playback.$('previewAudio');
   playback.$('fileListScroller').scrollTop=130;
+  playback.run('updateAudioButtons()');assert.equal(playback.$('headerAudio').disabled,true);await playback.run('toggleHeaderAudio()');assert.equal(audio.loads,0);
   await playback.run('toggleAudio(0)');assert.equal(audio.paused,false);assert.equal(playback.run('audioPlaying'),true);assert.equal(playback.run('editingResult.path'),'one.mp3');
   audio.currentTime=4.2;await playback.run('toggleAudio(0)');assert.equal(audio.paused,true);assert.equal(audio.currentTime,4.2);
   await playback.run('toggleAudio(0)');assert.equal(audio.paused,false);assert.equal(audio.currentTime,4.2);assert.equal(audio.loads,1);
+  assert.equal(playback.$('headerAudio').textContent,'⏸');assert.equal(playback.$('headerAudio').disabled,false);
+  const sortBefore=playback.run('fileSortColumn');
+  playback.run('filteredResults=[audioJob.results[1]]');
+  await playback.run('toggleHeaderAudio()');assert.equal(audio.paused,true);assert.equal(audio.currentTime,4.2);assert.equal(playback.$('headerAudio').textContent,'▶');
+  await playback.run('toggleHeaderAudio()');assert.equal(audio.paused,false);assert.equal(audio.currentTime,4.2);assert.equal(audio.loads,1);
+  assert.equal(playback.run('editingResult.path'),'one.mp3');assert.equal(playback.run('fileSortColumn'),sortBefore);assert.equal(playback.$('fileListScroller').scrollTop,130);
+  assert.ok(playback.run("audioButton('one.mp3',0)").includes('⏸'));
+  playback.run('filteredResults=audioJob.results');
   playback.run('selectFile(1)');playback.$('chg_title').value='Only editor changed';playback.$('chg_title').listeners.input();
   assert.equal(audio.paused,false);assert.equal(playback.run('playingPath'),'one.mp3');assert.equal(playback.$('fileListScroller').scrollTop,130);
   await playback.run('toggleAudio(1)');assert.equal(playback.run('playingPath'),'two.mp3');assert.equal(audio.currentTime,0);assert.equal(audio.loads,2);
@@ -53,6 +62,10 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   audio.canPlayType=()=>'';assert.equal(playback.run("canPreviewAudio('two.mp3')"),false);
   assert.ok(html.includes('event.stopPropagation();toggleAudio('));assert.ok(html.includes('width:24px;height:24px;'));
   assert.ok(html.includes('id="previewAudio" preload="none" hidden'));
+  assert.ok(html.includes('event.stopPropagation();toggleHeaderAudio()'));
+  assert.equal((html.match(/<audio /g)||[]).length,1);
+  assert.ok(html.includes('NAS v2.0.0'));
+  assert.equal(playback.$('headerAudio').textContent,'▶');
 
   const hover=harness(),hoverImages=[];
   const create=hover.context.document.createElement;

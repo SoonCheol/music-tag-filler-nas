@@ -1,8 +1,14 @@
-# Music Tag Filler NAS v1.0.0
+# Music Tag Filler NAS v2.0.0
 
 음악 검색·후보 적용·태그/커버/가사 처리와 무결성 백업을 제공하는 NAS 웹 앱입니다.
 이 비공개 저장소는 소스·설치 방법·운영 기록을 보관합니다.
 **음악, 프로그램 data, API 키, SSH 개인키는 별도 백업해야 합니다.**
+
+[v2.0.0 검증·배포 기록](docs/RELEASE_V2_0_0.md)
+
+## v2.0.0 음악 미리듣기
+
+파일 행의 재생 버튼으로 한 곡씩 듣고, 파일명 열 제목 앞의 공통 버튼으로 일시정지·이어서 재생합니다. 재생 파일이 목록에 없어도 공통 버튼으로 제어할 수 있습니다. 파일 선택·태그 편집과 독립적으로 동작하며 읽기 전용 Range 스트리밍으로 원본 음악을 변경하지 않습니다. MP3와 브라우저가 지원하는 FLAC·M4A·OGG를 지원합니다.
 
 ## 다시 설치하거나 AI에게 인계할 때
 
@@ -18,7 +24,7 @@
 | [라이선스](THIRD_PARTY_NOTICES.md) | 원본 MIT와 Chromaprint/FFmpeg 고지 |
 | [준비 검증 결과](docs/READINESS_REPORT.md) | 누락·보안·테스트·실행하지 않은 항목 |
 | [보안 검사](docs/SECURITY_AUDIT_KO.md) | 비밀값 검사·기존 의존성 보안 공지와 후속 작업 |
-| [v1.0.0 등록 준비](docs/RELEASE_V1_0_0.md) | 운영 재점검·릴리스 문안·등록 전 남은 절차 |
+| [과거 v1.0.0 등록 준비](docs/RELEASE_V1_0_0.md) | 운영 재점검·릴리스 문안·등록 전 남은 절차 |
 
 ## 활성 파일
 
@@ -47,5 +53,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1
 운영 음악은 사용자 요청으로 **`/music:rw`**로 전환했습니다. 실제 저장·이름 변경·되돌리기가
 가능하므로 원본 백업을 유지합니다. 검증 결과는 [쓰기 마운트 검증](docs/RW_MOUNT_VALIDATION.md)을 참고하며 테스트는 격리된 생성 음원만 사용합니다.
 
-정식 이름 이전과 GitHub 등록의 실제 진행 상태는 [v1.0.0 등록 상태](docs/V1_REGISTRATION_STATUS.md)를
+과거 정식 이름 이전과 초기 GitHub 등록 기록은 [v1.0.0 등록 상태](docs/V1_REGISTRATION_STATUS.md)를
 따릅니다. push 완료를 확인하기 전에는 GitHub만으로 최신 작업을 복구할 수 없습니다.

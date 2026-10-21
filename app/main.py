@@ -20,9 +20,9 @@ JOBS_FILE = DATA_ROOT / "jobs.json"
 BACKUP_ROOT = DATA_ROOT / "backups"
 BACKUP_ROOT.mkdir(exist_ok=True)
 
-musicbrainzngs.set_useragent("music-tag-filler-nas", "0.4.0", "https://github.com/microhan1/music-tag-filler")
+musicbrainzngs.set_useragent("music-tag-filler-nas", "2.0.0", "https://github.com/microhan1/music-tag-filler")
 
-app = FastAPI(title="음악 정보 채우기 NAS Web")
+app = FastAPI(title="음악 정보 채우기 NAS Web", version="2.0.0")
 
 # --- job store ---
 jobs: Dict[str, dict] = {}

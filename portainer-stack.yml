@@ -2,7 +2,7 @@
 # Build the image first. Portainer stack/project name MUST be music-tag-filler.
 services:
   music-tag-filler:
-    image: music-tag-filler-nas:v1.0.0
+    image: music-tag-filler-nas:v2.0.0
     container_name: music-tag-filler
     ports:
       - "8000:8000"
