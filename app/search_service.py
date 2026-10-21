@@ -150,6 +150,8 @@ def network_error(source, exc):
 
 def sound(path, config, query, duration, cancel=None, on_wait=None):
     errors = []
+    if cancel is not None and cancel.is_set():
+        return [], errors
     if not config.acoustid_key:
         errors.append(error("AcoustID", "missing_api_key", "AcoustID API 키가 없습니다. /data/acoustid_key.txt에 발급받은 키를 설정하세요"))
     if not search_acoustid.find_fpcalc(config.fpcalc_path or None):
@@ -193,7 +195,7 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
                 candidates, problems = call.result()
                 found.extend(candidates)
                 errors.extend(problems)
-    if mode == "sound" or (not found and use_fingerprint and not (cancel and cancel.is_set())):
+    if not (cancel and cancel.is_set()) and (mode == "sound" or (not found and use_fingerprint)):
         used_sound = True
         candidates, problems = sound(path, config, query, duration, cancel, on_wait)
         found.extend(candidates)

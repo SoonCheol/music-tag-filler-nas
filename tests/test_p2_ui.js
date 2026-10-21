@@ -33,6 +33,20 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  assert.ok(!html.includes('id="btnStop"'));
+  assert.ok(!script.includes('async function stopScan'));
+  const scanUi=harness();
+  const scanJob={id:'scan-stop',status:'scanning',sub_path:'',scanned:1,total:3,results:[],created_at:1};
+  scanUi.context.jobsResponse=[scanJob];
+  await scanUi.run('pollJobs()');
+  assert.ok(scanUi.$('jobs').children[0].innerHTML.includes("cancelSpecific('scan-stop')"));
+  await scanUi.run("cancelSpecific('scan-stop')");
+  assert.ok(scanUi.calls.some(c=>c.url==='/api/jobs/scan-stop/cancel'&&c.method==='POST'));
+  scanJob.status='cancelling';await scanUi.run('pollJobs()');
+  assert.match(scanUi.$('progressText').textContent,/1\/3.*cancelling/);
+  scanJob.status='cancelled';await scanUi.run('pollJobs()');
+  assert.match(scanUi.$('progressText').textContent,/1\/3.*cancelled/);
+  assert.equal(scanUi.$('btnResume').style.display,'inline-block');
   const h=harness();
   h.run("musicFolders=['Album','Album/Disc1','Album/Disc1/Bonus','Album/Disc2','Other']; renderFolders()");
   h.$('folderToggle').onclick();assert.equal(h.$('folderMenu').hidden,false);

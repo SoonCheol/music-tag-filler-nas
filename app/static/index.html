@@ -81,7 +81,6 @@ tr.selected{background:var(--blue-light) !important}
     <button id="btnFolderConfirm" class="btn" onclick="confirmFolder(event)">선택</button>
     <label style="font-size:11px"><input id="recurse" type="checkbox" checked> 하위 폴더 포함</label>
     <button id="btnScan" class="btn btn-blue" onclick="startScan()">스캔 시작</button>
-    <button id="btnStop" class="btn btn-red" style="display:none" onclick="stopScan()">중지</button>
     <button id="btnResume" class="btn btn-green" style="display:none" onclick="resumeScan()">이어하기</button>
   </div>
   <div class="right-wrap" id="fileColumn">
@@ -278,7 +277,7 @@ function clearFolderResults(){
   applyFilter();tagFields.forEach(f=>{$('cur_'+f).textContent='';$('chg_'+f).value='';$('chg_'+f).style.backgroundColor='';});
   $('currentCover').textContent='no image';$('changeCover').textContent='no image';$('candBody').innerHTML='<tr><td colspan="6">이 폴더의 스캔 기록이 없습니다.</td></tr>';
   $('lyricStatus').textContent='없음';$('lyricStatus').onclick=null;$('progBar').style.width='0%';$('progressText').textContent='';$('statusLine').textContent='선택한 폴더의 스캔 기록이 없습니다';
-  $('btnStop').style.display='none';$('btnResume').style.display='none';
+  $('btnResume').style.display='none';
 }
 const expandedFolders=new Set();
 try{JSON.parse(localStorage.getItem('musicFolderExpansion')||'[]').filter(p=>typeof p==='string').forEach(p=>expandedFolders.add(p));}catch(e){}
@@ -345,9 +344,8 @@ async function startScan(force=false){
   if(!sub&&!await confirmAction('전체 음악 스캔', '전체를 선택했습니다. 음악 파일이 약 8만 개이므로 전체 스캔에 매우 오랜 시간이 걸릴 수 있습니다.\n전체 스캔을 시작할까요?', '전체 스캔 시작'))return;
   if(sub!==$('subPath').value.trim())return;
   const payload={sub_path:sub,paths:$('scanPaths').value.split('\n').map(p=>p.trim()).filter(Boolean),recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,country:$('searchCountry').value||null,use_fingerprint:true,force};
-  try{$('btnScan').disabled=true;const res=await api('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentJobId=res.job_id;persistView();pollJobs();}catch(e){if(e.status===409&&e.detail){if(confirm((e.detail.message||'이미 스캔 중')+'\n중지하고 새로 시작할까요?')){try{await api('/api/jobs/'+e.detail.active_job_id+'/cancel',{method:'POST'});setTimeout(()=>startScan(true),800);}catch(err){alert(err.message)}}}else alert(e.message)}finally{$('btnScan').disabled=false}
+  try{$('btnScan').disabled=true;const res=await api('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentJobId=res.job_id;persistView();pollJobs();}catch(e){if(e.status===409&&e.detail){alert(e.detail.message||'백그라운드 작업 목록에서 스캔을 중지해 주세요')}else alert(e.message)}finally{$('btnScan').disabled=false}
 }
-async function stopScan(){if(!currentJobId) return; if(!confirm('중지할까요? 이어하기 가능')) return; await api('/api/jobs/'+currentJobId+'/cancel',{method:'POST'});}
 async function resumeScan(){if(!currentJobId) return; await api('/api/jobs/'+currentJobId+'/resume',{method:'POST'}); pollJobs();}
 async function pollJobs(){
   try{
@@ -361,7 +359,7 @@ async function pollJobs(){
         // 중지 버튼 추가: scanning, queued, interrupted 모두에 중지/삭제 제공
         let btns='';
         if(j.status==='scanning'||j.status==='queued'||j.status==='cancelling'){
-          btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="api('/api/jobs/${j.id}/cancel',{method:'POST'})">중지</button>`;
+          btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="cancelSpecific('${j.id}')">중지</button>`;
         }else if(j.status==='interrupted'){
           btns+=`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button>`;
           btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="cancelSpecific('${j.id}')">중지</button>`;
@@ -375,11 +373,11 @@ async function pollJobs(){
       });
     }
     let active=jobs.find(j=>j.id===currentJobId&&(!viewPinned||(j.sub_path||'')===$('subPath').value))||(viewPinned?jobs.find(j=>(j.sub_path||'')===$('subPath').value):jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0]);
-    if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=`${active.scanned}/${active.total||'?'} (${pct}%) ${active.status}`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnStop').style.display='inline-block'; $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnStop').style.display='none'; $('btnResume').style.display='inline-block';}else{$('btnStop').style.display='none'; $('btnResume').style.display='none';}if(!saving&&!searching&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
+    if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=`${active.scanned}/${active.total||'?'} (${pct}%) ${active.status}`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnResume').style.display='inline-block';}else{ $('btnResume').style.display='none';}if(!saving&&!searching&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
   }catch(e){}
   setTimeout(pollJobs, allJobs.some(j=>j.status==='scanning'||j.status==='queued')?1500:3000);
 }
-async function cancelSpecific(id){ if(!confirm('이 작업을 중지할까요?')) return; try{await api('/api/jobs/'+id+'/cancel',{method:'POST'});}catch(e){alert(e.message)} }
+async function cancelSpecific(id){ if(!confirm('이 작업을 중지할까요?')) return; try{await api('/api/jobs/'+id+'/cancel',{method:'POST'});pollJobs();}catch(e){alert(e.message)} }
 async function deleteSpecific(id){if(!confirm('작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/jobs/'+id,{method:'DELETE'});if(currentJobId===id){currentJobId=null;displayedJobId=null;currentResults=[];editingResult=null;applyFilter();}pollJobs();}catch(e){alert(e.message);}}
 async function resumeSpecific(id){currentJobId=id;await resumeScan();}
 async function loadJob(id){if(saving||actionResolver)return;if(id!==currentJobId&&!await allowDraftMove())return;const job=await api('/api/jobs/'+id);adoptJob(job);}

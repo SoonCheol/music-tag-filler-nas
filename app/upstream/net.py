@@ -137,6 +137,8 @@ def request(method: str, url: str, *, params: dict | None = None, data: dict | N
         if cancel is not None and cancel.is_set():
             raise NetworkError("cancelled")
         throttle.wait(host, cancel)
+        if cancel is not None and cancel.is_set():
+            raise NetworkError("cancelled")
         try:
             resp = session().request(method, url, params=params, data=data, timeout=TIMEOUT, stream=stream)
         except requests.RequestException as exc:

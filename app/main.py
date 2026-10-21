@@ -102,28 +102,32 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
     job = jobs.get(job_id)
     if not job:
         return
+    cancelled = ScanCancellation(job)
     try:
-        files = job_service.collect(MUSIC_ROOT, opts.get("paths") or [sub_path], opts.get("recurse", True))
+        files = job_service.collect(MUSIC_ROOT, opts.get("paths") or [sub_path], opts.get("recurse", True), cancel=cancelled)
         previous = job.get("results", []) if resume else []
-        retained, pending, missing = job_service.retained_results(MUSIC_ROOT, files, previous)
+        retained, pending, missing = job_service.retained_results(MUSIC_ROOT, files, previous, cancel=cancelled)
         with storage.OPERATION_LOCK:
             if job.get("cancel_requested"):
-                job.update(status="cancelled", cancelled_at=time.time())
+                job.update(status="cancelled", finished_at=time.time(), current_file="", search_wait_seconds=0, diagnostic="중지 완료")
                 save_jobs()
                 return
             job.update(status="scanning", total=len(files), results=retained, scanned=len(retained),
                        missing_paths=missing, diagnostic="", search_wait_seconds=0)
             save_jobs()
-        cancelled = ScanCancellation(job)
         for path in pending:
             if cancelled.is_set():
                 break
             relative = path.relative_to(MUSIC_ROOT.resolve()).as_posix()
             with storage.OPERATION_LOCK:
+                if cancelled.is_set():
+                    break
                 job["current_file"] = relative
                 job["search_wait_seconds"] = 0
             try:
                 original = storage.describe(path)
+                if cancelled.is_set():
+                    break
                 artist, title = parse_filename(path)
                 artist, title = original.get("artist") or artist, original.get("title") or title
                 found = search_service.search(path, original_match.build_query(title, artist), opts.get("country"),
@@ -139,6 +143,8 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             except Exception as exc:
                 result = {"path": relative, "error": str(exc), "candidates": [], "original": {}}
             with storage.OPERATION_LOCK:
+                if cancelled.is_set():
+                    break
                 job["results"].append(result)
                 job["scanned"] = len(job["results"])
                 save_jobs()
@@ -146,6 +152,10 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             job.update(status="cancelled" if cancelled.is_set() else "done", finished_at=time.time(),
                        current_file="", search_wait_seconds=0,
                        diagnostic="중지 완료" if cancelled.is_set() else "")
+            save_jobs()
+    except job_service.ScanCancelled:
+        with storage.OPERATION_LOCK:
+            job.update(status="cancelled", finished_at=time.time(), current_file="", search_wait_seconds=0, diagnostic="중지 완료")
             save_jobs()
     except Exception as exc:
         with storage.OPERATION_LOCK:

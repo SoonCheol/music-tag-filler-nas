@@ -19,10 +19,20 @@ def normalize_jobs(raw):
     return raw
 
 
-def collect(root, paths, recurse=True):
+class ScanCancelled(Exception):
+    pass
+
+
+def check_cancel(cancel):
+    if cancel is not None and cancel.is_set():
+        raise ScanCancelled()
+
+
+def collect(root, paths, recurse=True, cancel=None):
     root = Path(root).resolve()
     found = set()
     for value in paths:
+        check_cancel(cancel)
         relative = Path(value)
         if relative.is_absolute() or ".." in relative.parts:
             raise storage.StorageError("음악 폴더 밖의 경로는 사용할 수 없습니다")
@@ -34,19 +44,22 @@ def collect(root, paths, recurse=True):
             found.add(target.resolve())
             continue
         for parent, directories, files in os.walk(target, followlinks=False):
+            check_cancel(cancel)
             directories[:] = [d for d in directories if not (Path(parent) / d).is_symlink()] if recurse else []
             for name in files:
+                check_cancel(cancel)
                 path = Path(parent) / name
                 if not path.is_symlink() and tags.format_of(str(path)) is not None:
                     found.add(path.resolve())
     return sorted(found, key=lambda p: p.as_posix().casefold())
 
 
-def retained_results(root, files, previous):
+def retained_results(root, files, previous, cancel=None):
     """Keep only unchanged, successfully read paths; never resume by row count."""
     previous = {r.get("path"): r for r in previous}
     retained, pending = [], []
     for path in files:
+        check_cancel(cancel)
         relative = path.relative_to(Path(root).resolve()).as_posix()
         old = previous.get(relative)
         if (old and not old.get("error") and old.get("original", {}).get("revision")
