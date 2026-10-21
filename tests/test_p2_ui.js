@@ -48,7 +48,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(h.$('subPath').value,'');assert.equal(h.$('folderMenu').hidden,false);
   assert(h.$('folderToggle').textContent.includes('(임시)'));
   const rootScan=h.run('startScan()');assert.equal(h.calls.filter(c=>c.url==='/api/scan').length,0);h.run('resolveAction(true)');await rootScan;assert.equal(h.calls.find(c=>c.url==='/api/scan').body.sub_path,'');
-  h.run('confirmFolder()');assert.equal(h.$('subPath').value,'Album/Disc2');
+  await h.run('confirmFolder()');assert.equal(h.$('subPath').value,'Album/Disc2');
   assert.equal(h.$('folderMenu').hidden,true);assert(!h.$('folderToggle').textContent.includes('(임시)'));
   h.documentEvents.click({target:{}});assert.equal(h.$('folderMenu').hidden,true);
   h.$('folderToggle').onclick();assert(row(h,'Album/Disc1/Bonus'));
@@ -113,7 +113,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   safety.run('resolveAction(false)');await cancelledRoot;assert.equal(safety.calls.length,0);
   const escapedRoot=safety.run('startScan()');safety.$('actionDialog').listeners.cancel({preventDefault(){}});
   await escapedRoot;assert.equal(safety.calls.length,0);
-  safety.run("pendingFolder='Album';confirmFolder()");
+  await safety.run("pendingFolder='Album';confirmFolder()");
   await safety.run('startScan()');await safety.run('pollJobs()');
   assert.equal(safety.calls.filter(c=>c.url==='/api/scan').length,1);
   assert.equal(safety.$('actionDialog').open,false); // Individual folder has no warning.
@@ -142,7 +142,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(reload.$('folderToggle').textContent,'Album ▼');
   assert.equal(reload.run('displayedJobId'),'folder-job');assert.equal(reload.run('editingResult.path'),'Album/a.mp3');
   assert.equal(reload.$('fileFilter').value,'a.mp3');
-  reload.run("pendingFolder='Unscanned';confirmFolder()");assert.equal(reload.run('currentResults.length'),0);
+  await reload.run("pendingFolder='Unscanned';confirmFolder()");assert.equal(reload.run('currentResults.length'),0);
   const emptyReload=harness();emptyReload.context.jobsResponse=reload.context.jobsResponse;
   await emptyReload.run('pollJobs()');assert.equal(emptyReload.$('subPath').value,'Unscanned');
   assert.equal(emptyReload.run('currentResults.length'),0);assert.equal(emptyReload.run('editingResult'),null);

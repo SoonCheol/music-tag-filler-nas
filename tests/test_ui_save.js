@@ -43,7 +43,7 @@ async function acceptSave(source) {
   run('resolveAction(true)');await pending;
 }
 function result(path) {
-  return { path, original: { title: 'Original', artist: 'Singer', album: 'Album', revision: 'a'.repeat(64) },
+  return { path, file_state: 'auto', original: { title: 'Original', artist: 'Singer', album: 'Album', revision: 'a'.repeat(64) },
     candidates: [{ id: 'first', title: 'First', artist: 'First singer', score: 95 },
       { id: 'second', title: 'Second', artist: 'Second singer', score: 55 }],
     best: null, auto_apply: false };
@@ -59,7 +59,7 @@ function result(path) {
   checks.find(check => check.dataset.field === 'artist').checked = false;
   await acceptSave('saveCurrent()');
   const request = sent.at(-1).body;
-  assert.equal(request.scope, 'selected');
+  assert.equal(request.scope, 'current');
   assert.deepEqual(request.paths, ['visible.mp3']);
   assert.equal(request.items[0].candidate_id, 'second');
   assert.equal(request.items[0].selection, 'edit');
@@ -71,18 +71,12 @@ function result(path) {
   context.sameJob = { id: 'one', results: [result('visible.mp3'), result('hidden.mp3'), result('new.mp3')] };
   run('adoptJob(sameJob)');
   assert.equal($('chg_title').value, 'User edited');
-  $('fileFilter').value = 'visible'; run('applyFilter()');
-  await acceptSave('saveAll()');
-  assert.equal(sent.at(-1).body.scope, 'selected');
-  assert.deepEqual(sent.at(-1).body.paths, ['visible.mp3']);
-  $('fileFilter').value = ''; run('applyFilter()');
-  await acceptSave('saveAll()');
-  assert.equal(sent.at(-1).body.scope, 'all');
-  assert.deepEqual(sent.at(-1).body.paths, ['visible.mp3', 'hidden.mp3', 'new.mp3']);
-  run('currentResults[1]._checked=true');
-  await acceptSave('saveAll()');
-  assert.equal(sent.at(-1).body.scope, 'selected');
-  assert.deepEqual(sent.at(-1).body.paths, ['hidden.mp3']);
+  run('currentResults[0]._checked=true');
+  $('fileFilter').value='visible';run('applyFilter()');await acceptSave('saveAll()');
+  assert.equal(sent.at(-1).body.scope,'all');assert.deepEqual(sent.at(-1).body.paths,['visible.mp3']);
+  $('fileFilter').value='';run('applyFilter()');run('currentResults[1]._checked=true');
+  await acceptSave('saveSelected()');assert.equal(sent.at(-1).body.scope,'selected');
+  assert.deepEqual(sent.at(-1).body.paths,['visible.mp3','hidden.mp3']);
   context.otherJob = { id: 'two', results: [result('other.mp3')] };
   run('adoptJob(otherJob)');
   assert.equal($('chg_title').value, 'Original');
@@ -102,12 +96,12 @@ function result(path) {
   // UI safety preview: the button and request must use the same target.
   context.previewJob = { id: 'preview', results: [result('show.mp3'), result('hide.mp3')] };
   run('adoptJob(previewJob)');
-  assert.equal($('btnSaveAll').textContent, '작업 전체 2곡 저장');
+  assert.equal($('btnSaveAll').textContent, '작업 전체 저장 (체크 0곡)');
   run('currentResults[1]._checked=true');
   $('fileFilter').value='show';run('applyFilter()');
-  assert.equal($('btnSaveAll').textContent, '필터 결과 1곡 저장');
+  assert.equal($('btnSaveAll').textContent, '작업 전체 저장 (체크 1곡)');
   assert.match($('selectedInfo').textContent, /숨김 1곡/);
-  run('toggleCheck(0)');assert.equal($('btnSaveAll').textContent, '체크한 1곡 저장');
+  run('toggleCheck(0)');assert.equal($('btnSaveAll').textContent, '작업 전체 저장 (체크 2곡)');
   $('chg_title').value='New title';$('chg_title').listeners.input();
   assert.match($('changeSummary').textContent, /제목/);
   $('onlyEmpty').checked=true;run('updateSavePreview()');
@@ -124,8 +118,8 @@ function result(path) {
   assert.equal(run('editingResult._coverId'),null);
   assert.equal(run('editingResult._selection'),'none');
   $('fileFilter').value='missing';run('applyFilter()');
-  assert.equal($('btnSaveAll').textContent,'필터 결과 0곡 저장');
-  assert.equal($('btnSaveAll').disabled,true);
+  assert.equal($('btnSaveAll').textContent,'작업 전체 저장 (체크 2곡)');
+  assert.equal($('btnSaveAll').disabled,false);
   assert.equal($('btnRestore').disabled,true);
   assert(html.includes('>최초 원본 복원</button>'));
   assert(html.includes('>편집 취소</button>'));
@@ -144,7 +138,7 @@ function result(path) {
   assert.match($('candidateFeedback').textContent,/빈 태그만 채우기/);
   run('editingResult._draft=originalValues(editingResult);applyCandidate(editingResult,{id:"empty"})');
   assert.match($('candidateFeedback').textContent,/적용할 태그 정보가 없는/);
-  assert.equal(run('Object.keys(buttonHelp).length'),6);
+  assert.equal(run('Object.keys(buttonHelp).length'),7);
   assert.match(run('buttonHelp.btnApplyCandidate'),/실제 파일은 변경하지 않습니다/);
   assert.match(run('buttonHelp.btnRestore'),/실제 음악 파일/);
   for(const id of run('Object.keys(buttonHelp)')){
@@ -156,7 +150,8 @@ function result(path) {
   for(const mode of ['current','all','filter','checked']){
     $('fileFilter').value='';run('adoptJob(previewJob)');
     run('currentResults.forEach(r=>r._checked=false)');
-    if(mode==='filter'){$('fileFilter').value='show';run('applyFilter()');}
+    if(mode==='filter'){$('fileFilter').value='show';run('applyFilter()');run('currentResults[0]._checked=true');}
+    if(mode==='all')run('toggleSelectAll(true)');
     if(mode==='checked')run('currentResults[0]._checked=true');
     const source=mode==='current'?'saveCurrent()':'saveAll()';
     const before=sent.length,pending=run(source);
@@ -251,5 +246,23 @@ function result(path) {
   }
   run('reportSave({saved:1,skipped:2,failed:0,partial:0,unchanged:1,unselected:1,results:[]})');
   assert.match($('saveResultCounts').innerHTML,/변경 없음: 1/);assert.match($('saveResultCounts').innerHTML,/미선택: 1/);
+  context.statesJob={id:'states',results:[result('auto1.mp3'),{...result('review.mp3'),file_state:'review'},
+    {...result('saved.mp3'),file_state:'saved'},result('auto2.mp3')]};
+  $('fileFilter').value='';run('adoptJob(statesJob);currentResults.forEach(r=>r._checked=true);renderFileList()');
+  assert.deepEqual(JSON.parse(run('JSON.stringify(currentResults.map(r=>!!r._checked))')),[true,false,false,true]);
+  assert.equal($('fileBody').children.slice(-4)[1].innerHTML.includes('disabled'),true);
+  assert.equal($('fileBody').children.slice(-4)[2].innerHTML.includes('disabled'),true);
+  $('fileFilter').value='auto1';run('applyFilter()');
+  await acceptSave('saveSelected()');assert.deepEqual(sent.at(-1).body.paths,['auto1.mp3','auto2.mp3']);
+  assert.deepEqual(sent.at(-1).body.checked_paths,['auto1.mp3','auto2.mp3']);
+  run('toggleSelectAll(false)');assert.equal($('btnSaveAll').disabled,true);assert.equal($('btnSaveSelected').disabled,true);
+  $('fileFilter').value='';run('applyFilter();selectFile(1)');
+  $('chg_title').value='Preserved review draft';$('chg_title').listeners.input();
+  const moveCancel=run('requestSelectFile(2)');assert.equal($('actionAccept').textContent,'보관하고 이동');
+  run('resolveAction(false)');await moveCancel;assert.equal(run('editingResult.path'),'review.mp3');
+  const moveKeep=run('requestSelectFile(2)');run('resolveAction(true)');await moveKeep;
+  assert.equal(run('editingResult.path'),'saved.mp3');assert.equal($('btnSaveCurrent').disabled,false);
+  await run('requestSelectFile(1)');assert.equal($('chg_title').value,'Preserved review draft');
+  assert.equal(run('fileState(editingResult)'),'review'); // Editing never promotes status.
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

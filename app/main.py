@@ -342,8 +342,9 @@ class SaveItem(BaseModel):
 
 class SaveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    scope: Literal["selected", "all"]
+    scope: Literal["current", "selected", "all"]
     paths: List[str]
+    checked_paths: List[str] = Field(default_factory=list)
     items: List[SaveItem]
     only_empty: bool = True
     fill_lyrics: bool = False
@@ -474,6 +475,11 @@ def candidate_cover(job_id: str, selection_id: str, path: str):
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
 
 
+def file_state(result):
+    stored = result.get("stored_saved", result.get("last_save", {}).get("status") in ("saved", "partial"))
+    return "saved" if stored else "auto" if result.get("scan_auto_selected", result.get("auto_apply", False)) else "review"
+
+
 def prepare_result(result):
     hint = result.get("parsed", {})
     artist = result.get("query_artist", result.get("original", {}).get("artist") or hint.get("artist", ""))
@@ -482,6 +488,9 @@ def prepare_result(result):
                                             result.get("original", {}).get("duration", 0))
     result["best"] = automatic_candidate(result)
     result["auto_apply"] = result["best"] is not None
+    result.setdefault("scan_auto_selected", result["auto_apply"])
+    result.setdefault("stored_saved", result.get("last_save", {}).get("status") in ("saved", "partial"))
+    result["file_state"] = file_state(result)
     return result
 
 
@@ -602,12 +611,18 @@ def save_job(job_id: str, request: SaveRequest):
         if (not paths or len(set(paths)) != len(paths) or len(items) != len(request.items)
                 or set(paths) != set(items) or not set(paths).issubset(results)):
             raise HTTPException(400, "저장 대상 경로와 파일별 요청을 명시적으로 지정하세요")
-        if request.scope == "all" and set(paths) != set(results):
-            raise HTTPException(400, "전체 저장은 작업의 모든 파일을 명시해야 합니다")
+        if request.scope == "current":
+            if len(paths) != 1 or request.checked_paths:
+                raise HTTPException(400, "현재 곡 저장은 한 곡만 지정해야 합니다")
+        elif (len(set(request.checked_paths)) != len(request.checked_paths)
+              or set(paths) != set(request.checked_paths)
+              or any(file_state(results[path]) != "auto" for path in paths)):
+            raise HTTPException(400, "일괄 저장은 체크된 자동선택 곡만 지정해야 합니다")
         outcomes = []
         lyric_context = {"busy_streak": 0}
         for relative in paths:
             result = results[relative]
+            result.setdefault("stored_saved", file_state(result) == "saved")
             try:
                 result["job_id"] = job_id
                 outcome = save_one(result, items[relative], request, lyric_context)
@@ -617,6 +632,10 @@ def save_job(job_id: str, request: SaveRequest):
                     result["original"] = outcome["original"]
                     result["path"] = outcome["path"]
                     result["abs_path"] = str(MUSIC_ROOT / outcome["path"])
+                if outcome.get("changed"):
+                    result["stored_saved"] = True
+                result["file_state"] = file_state(result)
+                outcome["file_state"] = result["file_state"]
                 result["last_save"] = {k: v for k, v in outcome.items() if k != "original"}
             except Exception as exc:
                 outcome = {"path": relative, "status": "failed", "message": str(exc)}
@@ -670,6 +689,8 @@ def revert_file(path: str, request: RevertRequest):
                 for result in job.get("results", []):
                     if result.get("path") == path:
                         result["original"] = outcome["original"]
+                        result["stored_saved"] = False
+                        result["file_state"] = file_state(result)
                         result["last_save"] = {"status": outcome["status"]}
             try:
                 save_jobs()

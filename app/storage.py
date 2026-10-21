@@ -283,7 +283,7 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
                 rename_error = "태그는 저장됐으나 이름 변경 실패: " + str(exc)
                 if isinstance(exc, tags.RenameFailed):
                     rename_error += "; 백업 위치: " + exc.backup
-    return {"status": "partial" if rename_error else "saved", "path": str(path.relative_to(root)),
+    return {"status": "partial" if rename_error else "saved", "changed": bool(content_changed or (rename_needed and rename_error is None)), "path": str(path.relative_to(root)),
             "original": describe(path), "rename_error": rename_error}
 
 

@@ -107,6 +107,7 @@ class P0Tests(unittest.TestCase):
             result = {"path": str(path.relative_to(self.root)), "original": original,
                       "parsed": {"title": original["title"], "artist": original["artist"]}, "candidates": candidates}
             main.prepare_result(result)
+            result["scan_auto_selected"] = True  # Base fixtures permit explicit bulk selection tests.
             results.append(result)
         main.jobs["test"] = {"id": "test", "status": "done", "options": {}, "results": results}
         return results
@@ -118,8 +119,10 @@ class P0Tests(unittest.TestCase):
         data.update(kwargs)
         return data
 
-    def request(self, items, scope="selected", **kwargs):
-        value = {"scope": scope, "paths": [item["path"] for item in items], "items": items,
+    def request(self, items, scope=None, **kwargs):
+        scope = scope or ("current" if len(items) == 1 else "selected")
+        value = {"scope": scope, "paths": [item["path"] for item in items],
+                 "checked_paths": [] if scope == "current" else [item["path"] for item in items], "items": items,
                  "only_empty": False, "fill_lyrics": False}
         value.update(kwargs)
         return value
@@ -361,15 +364,44 @@ class P0Tests(unittest.TestCase):
         before_hidden = paths[2].read_bytes()
         self.http(self.request([]), expected=400)
         self.http([], expected=422)  # old empty-list payload must never mean all
-        self.http(self.request([self.item(results[0])], scope="all"), expected=400)
+        self.http(self.request([self.item(results[0])], scope="all", checked_paths=[r["path"] for r in results]), expected=400)
         request = self.request([self.item(results[0], fields=[])])
         self.assertEqual(self.http(request)["skipped"], 1)
         response = self.http(self.request([self.item(results[0])]))
         self.assertEqual(response["requested"], 1)
         self.assertEqual(paths[1].read_bytes(), before_hidden)
         self.assertEqual(paths[2].read_bytes(), before_hidden)
-        all_items = [self.item(result, selection="none") for result in main.jobs["test"]["results"]]
-        self.assertEqual(self.http(self.request(all_items, scope="all"))["skipped"], 3)
+        all_items = [self.item(result, selection="none") for result in main.jobs["test"]["results"] if main.file_state(result) == "auto"]
+        self.assertEqual(self.http(self.request(all_items, scope="all"))["skipped"], 2)
+
+    def test_batch_state_boundaries_and_current_save_transitions(self):
+        paths = [self.copy(name) for name in ("auto.mp3", "review.mp3", "saved.mp3")]
+        results = self.job(paths)
+        results[1]["scan_auto_selected"] = False
+        results[2]["stored_saved"] = True
+        before = [path.read_bytes() for path in paths]
+        for index in (1, 2):
+            for scope in ("selected", "all"):
+                self.http(self.request([self.item(results[index])], scope=scope), expected=400)
+        self.http(self.request([self.item(results[0])], scope="all", checked_paths=[]), expected=400)
+        self.http(self.request([self.item(results[0]), self.item(results[1])], scope="current"), expected=400)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        unchanged = self.item(results[0], values={"title": "Original song"})
+        response = self.http(self.request([unchanged], scope="all"))
+        self.assertEqual(response["skipped"], 1)
+        self.assertEqual(main.file_state(results[0]), "auto")
+        response = self.http(self.request([self.item(results[0])], scope="selected"))
+        self.assertEqual(response["saved"], 1)
+        self.assertEqual(response["results"][0]["file_state"], "saved")
+        self.http(self.request([self.item(results[0])], scope="all"), expected=400)
+        for index in (1, 2):
+            response = self.http(self.request([self.item(results[index])], scope="current"))
+            self.assertEqual(response["saved"], 1)
+            self.assertEqual(main.file_state(results[index]), "saved")
+        same = self.item(results[1])
+        response = self.http(self.request([same], scope="current"))
+        self.assertEqual(response["skipped"], 1)
+        self.assertEqual(main.file_state(results[1]), "saved")
 
     def test_http_low_score_generic_and_forged_candidate_rejected(self):
         path = self.copy()

@@ -146,7 +146,8 @@ tr.selected{background:var(--blue-light) !important}
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
             <button id="btnApplyCandidate" class="btn btn-blue" onclick="toggleTagPreview()">미리보기</button>
             <button id="btnSaveCurrent" class="btn" onclick="saveCurrent()">현재 곡 저장</button>
-            <button id="btnSaveAll" class="btn" onclick="saveAll()">작업 전체 0곡 저장</button>
+            <button id="btnSaveSelected" class="btn" onclick="saveSelected()">선택 곡 저장 (0곡)</button>
+            <button id="btnSaveAll" class="btn" onclick="saveAll()">작업 전체 저장 (체크 0곡)</button>
             <button id="btnDiscard" class="btn" onclick="discardDraft()">편집 취소</button>
             <button id="btnRestore" class="btn" onclick="resetChange()">최초 원본 복원</button>
             <button id="btnOptions" class="btn" onclick="openSaveOptions()" disabled>저장 옵션</button>
@@ -216,6 +217,7 @@ let currentJobId=null,allJobs=[],currentResults=[],filteredResults=[],selectedFi
 let editingResult=null,displayedJobId=null,saving=false,searching=false,lastJobSignature='';
 const tagFields=['title','artist','album','albumartist','track','year','genre'];
 let previewPath=null,previewRevision=null;
+const draftJobs=new Map();
 let actionResolver=null;
 function confirmAction(title,message,acceptLabel,cancelLabel='취소'){
   if(actionResolver)return Promise.resolve(false);
@@ -233,16 +235,19 @@ function candidateValues(c){
   if(!c)return {};
   return $('artistPreference').value==='latin'?{...c,artist:c.artist_latin||c.artist,albumartist:c.album_artist_latin||c.albumartist}:{...c};
 }
+function draftSignature(r){return JSON.stringify([r._draft,r._fields,r._candidateId||null,r._coverId||null]);}
 function ensureDraft(r){
   if(r._draft)return;
   r._draft=originalValues(r);r._manualFields=[];r._fields=[...tagFields];r._draftRevision=r.original?.revision||'';
   const best=r.auto_apply?r.best:null;r._candidateId=best?.id||null;r._selection=best?'auto':'none';
   if(best){const values=candidateValues(best);tagFields.forEach(f=>{if(values[f])r._draft[f]=String(values[f]);});}
+  r._draftBaseline=draftSignature(r);
 }
 function captureCurrent(){if(!editingResult)return;ensureDraft(editingResult);tagFields.forEach(f=>editingResult._draft[f]=$('chg_'+f).value);editingResult._fields=[...document.querySelectorAll('.chg-check')].filter(c=>c.checked).map(c=>c.dataset.field);}
 function adoptJob(job){
   captureCurrent();const selectedPath=editingResult?.path;
-  const previous=displayedJobId===job.id?new Map(currentResults.map(r=>[r.path,r])):new Map();
+  if(displayedJobId)draftJobs.set(displayedJobId,currentResults);
+  const previous=new Map((displayedJobId===job.id?currentResults:draftJobs.get(job.id)||[]).map(r=>[r.path,r]));
   currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
   if(typeof job.sub_path==='string'){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
   currentJobId=job.id;displayedJobId=job.id;lastJobSignature=jobSignature(job);editingResult=null;selectedFileIdx=-1;applyFilter();
@@ -254,8 +259,8 @@ function api(p,o={}){return fetch(p,o).then(async r=>{const t=await r.text();let
 function esc(s){return (s??'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let musicFolders=[],pendingFolder=$('subPath').value;
 function folderLabel(){const pending=pendingFolder!==$('subPath').value;const label=(pendingFolder||'전체')+(pending?' (임시)':'');$('folderToggle').textContent=label+' ▼';$('folderToggle').title=label;}
-function confirmFolder(event){
-  event?.stopPropagation();captureCurrent();$('subPath').value=pendingFolder;folderLabel();closeFolderMenu();
+async function confirmFolder(event){
+  event?.stopPropagation();if(pendingFolder!==$('subPath').value&&!await allowDraftMove())return;captureCurrent();$('subPath').value=pendingFolder;folderLabel();closeFolderMenu();
   const matching=allJobs.find(j=>(j.sub_path||'')===pendingFolder);
   if(matching)adoptJob(matching);else clearFolderResults();persistView();
 }
@@ -268,6 +273,7 @@ function persistView(){
   viewPinned=true;try{localStorage.setItem('musicFolderView',JSON.stringify({folder:$('subPath').value,jobId:currentJobId,filter:$('fileFilter').value,selectedPath:editingResult?.path||null}));}catch(e){}
 }
 function clearFolderResults(){
+  if(displayedJobId)draftJobs.set(displayedJobId,currentResults);
   currentJobId=null;displayedJobId=null;currentResults=[];editingResult=null;selectedFileIdx=-1;lastJobSignature='';
   applyFilter();tagFields.forEach(f=>{$('cur_'+f).textContent='';$('chg_'+f).value='';$('chg_'+f).style.backgroundColor='';});
   $('currentCover').textContent='no image';$('changeCover').textContent='no image';$('candBody').innerHTML='<tr><td colspan="6">이 폴더의 스캔 기록이 없습니다.</td></tr>';
@@ -376,7 +382,7 @@ async function pollJobs(){
 async function cancelSpecific(id){ if(!confirm('이 작업을 중지할까요?')) return; try{await api('/api/jobs/'+id+'/cancel',{method:'POST'});}catch(e){alert(e.message)} }
 async function deleteSpecific(id){if(!confirm('작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/jobs/'+id,{method:'DELETE'});if(currentJobId===id){currentJobId=null;displayedJobId=null;currentResults=[];editingResult=null;applyFilter();}pollJobs();}catch(e){alert(e.message);}}
 async function resumeSpecific(id){currentJobId=id;await resumeScan();}
-async function loadJob(id){if(saving)return;const job=await api('/api/jobs/'+id);adoptJob(job);}
+async function loadJob(id){if(saving||actionResolver)return;if(id!==currentJobId&&!await allowDraftMove())return;const job=await api('/api/jobs/'+id);adoptJob(job);}
 function applyFilter(){
   captureCurrent();const selectedPath=editingResult?.path;
   const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q));
@@ -384,13 +390,33 @@ function applyFilter(){
   if(selectedFileIdx<0){editingResult=null;if(filteredResults.length)selectedFileIdx=0;}
   renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);
 }
-function renderFileList(){
-  const body=$('fileBody'); if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return}
-  body.innerHTML=''; filteredResults.forEach((r,i)=>{const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';const state=r.last_save?.status;const status=state==='failed'?'저장실패':state==='partial'?'일부저장':state==='saved'?'저장됨':state==='skipped'?'건너뜀':r.auto_apply?'자동선택':'확인필요';const badge=state==='failed'||state==='partial'?'badge-warn':r.auto_apply||state==='saved'?'badge-ok':'badge-warn';tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="badge ${badge}">${status}</span></td>`;tr.onclick=()=>selectFile(i);body.appendChild(tr);});
-  updateSavePreview();
+function fileState(r){return r.file_state||(r.last_save?.status==='saved'||r.last_save?.status==='partial'?'saved':r.auto_apply?'auto':'review');}
+function sanitizeChecks(){currentResults.forEach(r=>{if(fileState(r)!=='auto')r._checked=false;});}
+async function allowDraftMove(){
+  captureCurrent();if(!editingResult?._dirty||draftSignature(editingResult)===editingResult._draftBaseline)return true;
+  return confirmAction('미저장 편집 보관','현재 곡에 저장하지 않은 편집이 있습니다. 편집 내용을 보관하고 다른 곡으로 이동할까요?','보관하고 이동','계속 편집');
 }
-function toggleCheck(i){filteredResults[i]._checked=!filteredResults[i]._checked;renderFileList();}
-function toggleSelectAll(checked){const val=typeof checked==='boolean'?checked:!filteredResults.every(r=>r._checked);filteredResults.forEach(r=>r._checked=val);$('checkAll').checked=val;renderFileList();}
+async function requestSelectFile(idx){
+  if(saving||actionResolver)return;
+  const r=filteredResults[idx];if(!r||r===editingResult)return;
+  if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
+}
+function renderFileList(){
+  sanitizeChecks();const body=$('fileBody');
+  if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
+  body.innerHTML='';filteredResults.forEach((r,i)=>{
+    const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장됨'}[state];
+    const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';
+    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="badge ${state==='review'?'badge-warn':'badge-ok'}">${status}</span></td>`;
+    tr.onclick=()=>requestSelectFile(i);body.appendChild(tr);
+  });updateSavePreview();
+}
+function toggleCheck(i){const r=filteredResults[i];if(r&&fileState(r)==='auto')r._checked=!r._checked;renderFileList();}
+function toggleSelectAll(checked){
+  const rows=currentResults.filter(r=>fileState(r)==='auto');
+  const value=typeof checked==='boolean'?checked:!rows.every(r=>r._checked);
+  rows.forEach(r=>r._checked=value);renderFileList();
+}
 function selectFile(idx){
   captureCurrent();
   selectedFileIdx=idx; const r=filteredResults[idx];
@@ -446,7 +472,7 @@ function applyCandidate(r,c){
   const blocked=offered.filter(f=>$('onlyEmpty').checked&&base[f]);
   tagFields.forEach(f=>{if(values[f])base[f]=String(values[f]);});
   const changed=tagFields.filter(f=>String(before[f]||'')!==String(base[f]||''));
-  r._draft=base;r._manualFields=[];r._candidateId=c.id;r._selection='manual';r._appliedFields=changed;
+  r._draft=base;r._dirty=true;r._manualFields=[];r._candidateId=c.id;r._selection='manual';r._appliedFields=changed;
   tagFields.forEach(f=>$('chg_'+f).value=base[f]);
   const url=candidateCoverUrl(c,r),coverAllowed=url&&!($('onlyEmpty').checked&&r.original?.has_cover);
   $('changeCover').innerHTML=coverAllowed?`<img src="${url}" onerror="this.parentElement.textContent='no image'">`:$('currentCover').innerHTML;
@@ -492,7 +518,7 @@ function renderTagPreview(r){
   }
   if($('currentCover').innerHTML!==html)$('currentCover').innerHTML=html;
 }
-function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();updateSavePreview();}
+function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();if(editingResult)editingResult._dirty=true;updateSavePreview();}
 function saveItem(r){
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
@@ -519,7 +545,7 @@ async function submitSave(rows,scope,label){
   if(!paths.length)return alert('저장할 파일이 없습니다');
   let items;try{items=rows.map(saveItem);}catch(e){return alert(e.message);}
   const jobId=currentJobId;
-  const payload={scope,paths,items,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,cover_max_px:Number($('coverMax').value),artist_name_preference:$('artistPreference').value||'original'};
+  const payload={scope,paths,checked_paths:scope==='current'?[]:[...paths],items,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,cover_max_px:Number($('coverMax').value),artist_name_preference:$('artistPreference').value||'original'};
   const message=`${label||(scope==='all'?'작업 전체':'지정한 파일')} ${paths.length}곡 저장?\n${planSummary(rows)}\n빈칸만: ${payload.only_empty?'예':'아니오'} / 파일명 변경: ${payload.rename?'예':'아니오'}`;
   saving=true;updateSavePreview();
   try{
@@ -527,20 +553,17 @@ async function submitSave(rows,scope,label){
     if(currentJobId!==jobId)throw new Error('확인 중 작업이 변경되었습니다. 저장 대상을 다시 확인하세요.');
     const res=await api('/api/jobs/'+jobId+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     res.results.forEach(o=>{const r=currentResults.find(r=>r.path===(o.request_path||o.path));if(!r)return;
-      r.last_save=o;if(o.original){r.original=o.original;r.path=o.path;r._draft=null;r._candidateFeedback=null;r._appliedFields=[];if(o.status==='saved')r._coverId=null;if(editingResult===r)editingResult=null;}
+      r.last_save=o;if(o.file_state)r.file_state=o.file_state;
+      if(o.changed){r._checked=false;r._dirty=false;}
+      if(o.original){r.original=o.original;r.path=o.path;if(o.changed){r._draft=null;r._candidateFeedback=null;r._appliedFields=[];r._coverId=null;if(editingResult===r)editingResult=null;}}
     });
     renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);reportSave(res);
   }catch(e){alert('저장 요청 실패: '+e.message);}finally{saving=false;updateSavePreview();}
 }
-async function saveCurrent(){if(!editingResult)return alert('파일을 선택하세요');return submitSave([editingResult],'selected','현재 곡');}
-function saveTarget(){
-  const selected=filteredResults.filter(r=>r._checked);
-  if(selected.length)return {rows:selected,scope:'selected',label:`체크한 ${selected.length}곡 저장`};
-  const filtered=$('fileFilter').value.trim()!=='';
-  const rows=filtered?filteredResults:currentResults;
-  return {rows,scope:filtered?'selected':'all',label:`${filtered?'필터 결과':'작업 전체'} ${rows.length}곡 저장`};
-}
-async function saveAll(){const target=saveTarget();return submitSave(target.rows,target.scope,target.label.replace(/ \d+곡 저장$/,''));}
+async function saveCurrent(){if(!editingResult)return alert('파일을 선택하세요');return submitSave([editingResult],'current','현재 곡');}
+function saveTarget(){sanitizeChecks();const rows=currentResults.filter(r=>r._checked&&fileState(r)==='auto');return {rows,scope:'all',label:`작업 전체 저장 (체크 ${rows.length}곡)`};}
+async function saveAll(){const target=saveTarget();return submitSave(target.rows,'all','체크한 자동선택');}
+async function saveSelected(){return submitSave(saveTarget().rows,'selected','체크한 자동선택');}
 const fieldLabels={title:'제목',artist:'가수',album:'앨범',albumartist:'앨범 가수',track:'트랙',year:'년도',genre:'장르'};
 function plannedChanges(r){
   ensureDraft(r);const base=originalValues(r),active=r._selection!=='none';
@@ -558,12 +581,13 @@ function planSummary(rows){
 }
 function updateSavePreview(){
   const target=saveTarget(),visible=filteredResults.filter(r=>r._checked).length;
-  const hidden=currentResults.filter(r=>r._checked&&!filteredResults.includes(r)).length;
+  const hidden=target.rows.length-visible,eligible=currentResults.filter(r=>fileState(r)==='auto');
   $('btnSaveAll').textContent=target.label;$('btnSaveAll').disabled=!target.rows.length||saving||searching;
+  $('btnSaveSelected').textContent=`선택 곡 저장 (${target.rows.length}곡)`;$('btnSaveSelected').disabled=!target.rows.length||saving||searching;
   $('selectedInfo').textContent=`체크: 표시 ${visible}곡 / 숨김 ${hidden}곡`;
-  $('checkAll').checked=filteredResults.length>0&&visible===filteredResults.length;
-  $('checkAll').indeterminate=visible>0&&visible<filteredResults.length;
-  $('saveScopeInfo').textContent=`저장 대상: ${target.label.replace(/ 저장$/,'')} · 전체선택은 표시 목록에만 적용${hidden?' · 숨김 체크 항목은 이번 저장에서 제외':''}. `+planSummary(target.rows)+' (최종 결과는 저장 시 검증)';
+  $('checkAll').checked=eligible.length>0&&target.rows.length===eligible.length;
+  $('checkAll').indeterminate=target.rows.length>0&&target.rows.length<eligible.length;
+  $('saveScopeInfo').textContent=`일괄 저장 대상: 체크된 자동선택 ${target.rows.length}곡 (필터 숨김 ${hidden}곡 포함). 작업 전체 저장과 선택 곡 저장은 같은 체크 범위를 사용합니다. 전체선택도 모든 자동선택 곡에만 적용됩니다. `+planSummary(target.rows);
   const r=editingResult&&filteredResults.includes(editingResult)?editingResult:null;
   renderTagPreview(r);
   ['btnSaveCurrent','btnDiscard','btnRestore'].forEach(id=>$(id).disabled=!r||saving||searching);
@@ -579,7 +603,7 @@ async function discardDraft(){
   if(!editingResult||saving||searching)return;
   const r=editingResult,jobId=currentJobId;if(!await confirmAction('미저장 편집 취소','현재 곡의 미저장 편집을 취소할까요? 음악 파일은 변경하지 않습니다.','편집 취소','계속 편집'))return;
   if(editingResult!==r||currentJobId!==jobId||saving||searching)return;
-  r._draft=originalValues(r);r._fields=[...tagFields];r._candidateId=null;r._selection='none';r._coverId=null;r._candidateFeedback=null;r._appliedFields=[];
+  r._dirty=false;r._draft=originalValues(r);r._fields=[...tagFields];r._candidateId=null;r._selection='none';r._coverId=null;r._candidateFeedback=null;r._appliedFields=[];r._draftBaseline=draftSignature(r);
   editingResult=null;selectFile(selectedFileIdx);
 }
 async function resetChange(){
@@ -593,8 +617,8 @@ async function resetChange(){
     alert((res.status==='restored'?'원본 복원 완료 (SHA256 일치)':'이미 원본과 같습니다')+(res.state_error?'\n작업 상태 기록 오류: '+res.state_error:''));
   }catch(e){alert('복원 실패: '+e.message);}finally{saving=false;updateSavePreview();}
 }
-tagFields.forEach(f=>$('chg_'+f).addEventListener('input',()=>{if(editingResult){captureCurrent();editingResult._manualFields=[...new Set([...(editingResult._manualFields||[]),f])];editingResult._selection='edit';editingResult._candidateFeedback=null;editingResult._appliedFields=[];updateSavePreview();}}));
-document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{captureCurrent();updateSavePreview();}));
+tagFields.forEach(f=>$('chg_'+f).addEventListener('input',()=>{if(editingResult){captureCurrent();editingResult._dirty=true;editingResult._manualFields=[...new Set([...(editingResult._manualFields||[]),f])];editingResult._selection='edit';editingResult._candidateFeedback=null;editingResult._appliedFields=[];updateSavePreview();}}));
+document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{captureCurrent();if(editingResult)editingResult._dirty=true;updateSavePreview();}));
 function candidateCoverUrl(c,r){return c.id&&(c.cover_url||c.album)?`/api/jobs/${encodeURIComponent(currentJobId)}/cover/${encodeURIComponent(c.id)}?path=${encodeURIComponent(r.path)}`:'';}
 function searchSummary(r){
   const labels={matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};
@@ -626,7 +650,8 @@ async function manualSearch(){
 }
 $('searchQ').title='국가 지정: @JP 가수 - 제목 (@KR/@US 등). 음향 검색: @sound 또는 @JP @sound';
 $('searchQ').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualSearch();}});
-$('fileFilter').addEventListener('input',()=>{applyFilter();persistView();});
+let confirmedFilter=$('fileFilter').value;
+$('fileFilter').addEventListener('input',async()=>{const q=$('fileFilter').value;if(editingResult&&!editingResult.path.toLowerCase().includes(q.toLowerCase())&&!await allowDraftMove()){$('fileFilter').value=confirmedFilter;return;}confirmedFilter=q;applyFilter();persistView();});
 function preferenceValues(){return {country:$('searchCountry').value,recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,include_ids:$('includeIds').checked,artist_name_preference:$('artistPreference').value,cover_max_px:Number($('coverMax').value)};}
 async function loadPreferences(){try{const p=await api('/api/preferences');$('searchCountry').value=p.country;$('recurse').checked=p.recurse;$('onlyEmpty').checked=p.only_empty;$('fillLyrics').checked=p.fill_lyrics;$('renameFiles').checked=p.rename;$('includeIds').checked=p.include_ids;$('artistPreference').value=p.artist_name_preference;$('coverMax').value=p.cover_max_px;}catch(e){$('statusLine').textContent='설정 읽기 실패: '+e.message;}finally{$('btnOptions').disabled=false;updateSavePreview();}}
 const modalOptionIds=['onlyEmpty','fillLyrics','renameFiles','includeIds','searchCountry','artistPreference','coverMax','scanPaths'];
@@ -654,13 +679,13 @@ async function uploadCover(file){
   if(!editingResult)return alert('파일을 선택하세요');if(saving||searching)return;
   if(!file||file.size>20*1024*1024)return alert('20MB 이하 이미지를 선택하세요');
   captureCurrent();const r=editingResult,jobId=currentJobId;searching=true;
-  try{const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});r._coverId=value.cover_id;if(r._selection==='none'||r._selection==='auto')r._selection='edit';if(editingResult===r){editingResult=null;selectFile(filteredResults.indexOf(r));}$('statusLine').textContent='커버 준비 완료 — 저장 전까지 음악 파일은 변경되지 않습니다';}catch(e){alert('커버 선택 실패: '+e.message);}finally{searching=false;updateSavePreview();}
+  try{const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});r._coverId=value.cover_id;r._dirty=true;if(r._selection==='none'||r._selection==='auto')r._selection='edit';if(editingResult===r){editingResult=null;selectFile(filteredResults.indexOf(r));}$('statusLine').textContent='커버 준비 완료 — 저장 전까지 음악 파일은 변경되지 않습니다';}catch(e){alert('커버 선택 실패: '+e.message);}finally{searching=false;updateSavePreview();}
 }
 async function applyCoverToAll(){
   if(!editingResult||saving||searching)return;captureCurrent();const r=editingResult,jobId=currentJobId;
   if(!confirm('현재 작업 전체 '+currentResults.length+'곡에 같은 커버를 준비할까요? 실제 기록은 저장할 때 수행합니다.'))return;
   try{if(!r._coverId){const c=r.candidates?.find(c=>c.id===r._candidateId);const url=c?candidateCoverUrl(c,r):r.original?.has_cover?'/api/cover/'+encodeURIComponent(r.path):'';if(!url)throw new Error('선택한 커버가 없습니다');searching=true;const response=await fetch(url);if(!response.ok)throw new Error('커버 읽기 실패');const image=await response.blob();const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':image.type},body:image});r._coverId=value.cover_id;}
-    currentResults.forEach(row=>{ensureDraft(row);row._coverId=r._coverId;if(row._selection==='none'||row._selection==='auto')row._selection='edit';});editingResult=null;selectFile(filteredResults.indexOf(r));alert('전체 커버 준비 완료. 빈칸만 옵션과 저장 범위는 그대로 적용됩니다.');
+    currentResults.forEach(row=>{ensureDraft(row);row._coverId=r._coverId;row._dirty=true;if(row._selection==='none'||row._selection==='auto')row._selection='edit';});editingResult=null;selectFile(filteredResults.indexOf(r));alert('전체 커버 준비 완료. 빈칸만 옵션과 저장 범위는 그대로 적용됩니다.');
   }catch(e){alert(e.message);}finally{searching=false;updateSavePreview();}
 }
 ['onlyEmpty','fillLyrics','renameFiles','includeIds'].forEach(id=>$(id).addEventListener('change',()=>{captureCurrent();updateSavePreview();}));
@@ -670,7 +695,8 @@ $('changeCover').addEventListener('drop',e=>{e.preventDefault();uploadCover(e.da
 const buttonHelp={
   btnApplyCandidate:'아래 편집 내용을 체크 상태와 저장 옵션에 맞춰 위쪽에 미리 표시합니다. 달라지는 값은 빨간 글씨로 표시합니다.\n미리보기 취소 시 위쪽만 원래 정보로 돌아가며 아래 편집 내용과 실제 파일은 변경하지 않습니다.',
   btnSaveCurrent:'오른쪽에 표시된 현재 한 곡을 저장합니다.\n체크한 태그 항목과 저장 옵션을 반영해 실제 음악 파일을 변경합니다.',
-  btnSaveAll:'체크한 곡, 필터 결과 또는 작업 전체를 저장합니다. 실제 대상과 곡 수는 버튼과 저장 대상 안내를 확인하세요.\n각 곡의 후보·편집 내용을 사용하며 현재 곡의 값을 모든 곡에 복사하지 않습니다.',
+  btnSaveAll:'필터와 관계없이 체크된 자동선택 곡만 저장합니다. 확인필요·저장됨 곡은 제외합니다.',
+  btnSaveSelected:'필터로 숨겨진 곡을 포함해 체크된 자동선택 곡만 저장합니다. 현재 곡 저장과 별도 범위입니다.',
   btnDiscard:'현재 곡의 미저장 편집을 버리고 편집 전 태그 값으로 돌아갑니다.\n이미 저장된 음악 파일은 변경하지 않습니다.',
   btnRestore:'주의: 실제 음악 파일을 최초 백업 당시의 내용으로 복원합니다.\n이후 저장한 변경도 되돌아갑니다. 편집 취소와 다른 기능입니다.',
   btnOptions:'빈 태그만 채우기, 가사 추가, 파일명 변경, 식별자 저장을 설정합니다.\n검색 국가·가수 표기·커버 크기도 여기서 설정합니다.'
