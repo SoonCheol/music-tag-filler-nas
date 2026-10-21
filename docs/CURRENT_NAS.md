@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v1.0.0` |
-| 이미지 ID | `sha256:148df465bfc0ecbfa3020834d479772e02d08ad8f6ce8877e0a45f79f1ded93b` |
+| 이미지 ID | `sha256:ecb2a0f4d8c2772cb26dc8b883c4db15036c579b715b81e24c7b815fa984a1a5` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -66,3 +66,42 @@ NAS 프로젝트의 `deploy-backups/name-migration-20261021/`에 원본 Portaine
 [등록 기록](V1_REGISTRATION_STATUS.md)을 따른다. 이번 이름 이전에서는 이 시험들을 반복하지 않았다.
 AcoustID 키 미설정과 기존 보안 공지 제한은 [보안 보고서](SECURITY_AUDIT_KO.md)에 남아 있다.
 원본 음악·data·API 키·SSH 개인키는 GitHub만으로 복구할 수 없으며 별도 백업이 필요하다.
+
+## 저장 전 UI 안내 개선 배포 — 2026-10-21
+
+기존 deploy-nas.ps1 및 local JSON으로 UI 변경을 배포했다. 스택/컨테이너 이름과
+마운트·환경·포트·권한은 기존 검사를 통과했다. 기존 이미지 태그를 사용해 재빌드했으며
+상단 이미지 ID가 이번 실행 이미지다. GitHub v1.0.0 태그/Release와 HEAD dce4018은 변경하지 않았다.
+소스는 미커밋 작업본이다. 이전 릴리스 이미지 ID는 V1_REGISTRATION_STATUS.md의 역사적 기록을 따른다.
+백업: /volume3/docker3/music-tag-filler-v6/deploy-backups/20261021-061358-dac02e5b.
+웹 HTTP 200, 운영 HTML과 로컬 HTML 바이트 일치, 폴더 API 및 실제 브라우저 UI 표시 확인.
+관련 UI 테스트만 통과시켰고 전체 회귀는 반복하지 않았다. 운영 음악 저장·복원·스캔, 설정 저장, GitHub push는 실행하지 않았다.
+
+## 모달 및 폴더 복원 개선 배포 — 2026-10-21
+
+기존 deploy-nas.ps1/local JSON으로 배포 완료. 컨테이너 music-tag-filler와 기존 설정/마운트 유지 검증.
+원본 백업: /volume3/docker3/music-tag-filler-v6/deploy-backups/20261021-062906-0486bc15.
+현재 이미지 ID는 상단 표를 따른다. Git HEAD dce4018 및 GitHub 태그/Release는 그대로이며 미커밋 작업본을 배포했다.
+관련 UI 테스트 2종 및 CheckOnly/PreflightOnly 통과, 웹 HTTP 200 및 운영 HTML과 로컬 파일 바이트 일치.
+실제 웹에서 편집 취소/계속 편집, 폴더·필터·파일 목록의 새로고침 복원, 전체 스캔 경고 후 취소 확인.
+저장 결과 모달은 배포 HTML을 사용하는 로컬 가상 데이터 미리보기와 격리 UI 테스트로 확인했다.
+실제 스캔·음악 저장·원본 복원·설정 저장·GitHub push는 실행하지 않았고 서버 작업은 기존 2건을 유지했다.
+
+## 후보 적용 피드백 및 툴팁 배포 — 2026-10-21
+
+기존 배포 스크립트/설정으로 music-tag-filler 단독 재생성. 기존 마운트/환경/포트 유지 및 HTTP/폴더 API 검사 통과.
+백업: /volume3/docker3/music-tag-filler-v6/deploy-backups/20261021-064010-6fe6526e.
+현재 실행 이미지 ID는 상단 표와 같다. 소스는 기존 HEAD dce4018 위의 미커밋 작업본이며 GitHub push/태그 변경 없음.
+UI 테스트 2종 통과. 실제 웹에서 후보 값 반영/필드 강조/중복 적용 사유/파일 저장 전 안내와 6개 툴팁의 키보드 포커스 표시·줄바꿈 확인.
+마우스 진입 이벤트 연결은 격리 UI 검사로 확인. 검증 초안은 편집 취소 후 새로고침으로 제거했다.
+실제 음악 저장·복원·스캔·옵션 기억은 실행하지 않았고 작업 기록 2건을 유지했다.
+
+## 저장 전 확인 모달 배포 및 로컬 커밋 — 2026-10-21
+
+기존 deploy-nas.ps1 및 local JSON으로 배포 완료. 기존 컨테이너 이름/마운트/환경/포트 유지 검사 통과.
+백업: /volume3/docker3/music-tag-filler-v6/deploy-backups/20261021-065027-ea878735. 현재 이미지 ID는 상단 표를 따른다.
+HTTP 200 및 운영 HTML과 로컬 소스 바이트 일치. 관련 UI 검사 2종 통과.
+실제 운영 페이지에서 현재 곡·필터 결과·작업 전체·체크 항목 저장의 사용자 정의 모달과 기본 JS 확인창 없음 확인.
+모든 운영 검증은 취소/Escape로 종료했고 실제 음악 저장·복원·스캔·설정 저장은 실행하지 않았다. 작업 기록 2건 유지.
+이 배포와 앞서 이 대화에서 구현한 UI 개선의 소스·관련 테스트·문서를 사용자 요청으로 로컬 Git에 함께 커밋한다.
+이전 절의 dce4018/미커밋 설명은 당시 배포 기록이다. 최신 로컬 커밋은 git log를 따른다. GitHub push 및 기존 태그/Release 변경 없음.

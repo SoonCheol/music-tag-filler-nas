@@ -20,7 +20,8 @@ function harness() {
     alert(){},confirm:()=>true,setTimeout(){},fetch:async(url,options={})=>{let body=options.body;
       if(typeof body==='string')body=JSON.parse(body);calls.push({url,body,method:options.method});
       let value=[];
-      if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
+      if(url==='/api/jobs')value=context.jobsResponse||[];
+      else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
       else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
       else if(url==='/api/scan')value={job_id:'scan'};
       else if(url.endsWith('/save'))value={saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
@@ -46,7 +47,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   click(row(h,'Album/Disc2').children.at(-1),h);
   assert.equal(h.$('subPath').value,'');assert.equal(h.$('folderMenu').hidden,false);
   assert(h.$('folderToggle').textContent.includes('(임시)'));
-  await h.run('startScan()');assert.equal(h.calls.find(c=>c.url==='/api/scan').body.sub_path,'');
+  const rootScan=h.run('startScan()');assert.equal(h.calls.filter(c=>c.url==='/api/scan').length,0);h.run('resolveAction(true)');await rootScan;assert.equal(h.calls.find(c=>c.url==='/api/scan').body.sub_path,'');
   h.run('confirmFolder()');assert.equal(h.$('subPath').value,'Album/Disc2');
   assert.equal(h.$('folderMenu').hidden,true);assert(!h.$('folderToggle').textContent.includes('(임시)'));
   h.documentEvents.click({target:{}});assert.equal(h.$('folderMenu').hidden,true);
@@ -85,6 +86,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const scan=h.calls.filter(c=>c.url==='/api/scan').at(-1).body;
   assert.deepEqual(scan.paths,['Album/one.mp3','Album/Disc2']);assert.equal(scan.recurse,false);assert.equal(scan.country,'JP');
   assert.equal(scan.only_empty,false);assert.equal(scan.fill_lyrics,false);
+  await h.run('pollJobs()');
   h.context.job={id:'work',results:[{path:'a.mp3',original:{title:'Old',artist:'Singer',revision:'a'.repeat(64)},candidates:[]},
     {path:'b.mp3',original:{title:'Other',revision:'b'.repeat(64)},candidates:[]}]};
   h.run('adoptJob(job)');await h.run('uploadCover({size:100,type:"image/png"})');
@@ -95,7 +97,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.$('onlyEmpty').checked=false;
   h.context.candidate={id:'latin',title:'Song',artist:'原文',artist_latin:'Latin',albumartist:'原文',album_artist_latin:'Latin'};
   h.run('applyCandidate(editingResult,candidate)');assert.equal(h.$('chg_artist').value,'Latin');assert.equal(h.$('chg_albumartist').value,'Latin');
-  await h.run('saveCurrent()');assert.equal(h.calls.at(-1).body.rename,true);
+  const confirmedSave=h.run('saveCurrent()');h.run('resolveAction(true)');await confirmedSave;assert.equal(h.calls.at(-1).body.rename,true);
   assert.equal(h.calls.at(-1).body.only_empty,false);assert.equal(h.calls.at(-1).body.fill_lyrics,false);
   const snapshot=h.run('jobSignature(job)');h.context.job.results[0].search_generation='new-generation';
   assert.notEqual(h.run('jobSignature(job)'),snapshot);
@@ -103,6 +105,47 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.context.updated={id:'work',results:[{path:'a.mp3',original:{revision:'a'.repeat(64)},candidates:[]},
     {path:'b.mp3',original:{title:'External update',revision:'c'.repeat(64)},candidates:[]}]};
   h.run('adoptJob(updated)');assert.equal(h.run('editingResult.path'),'b.mp3');assert.equal(h.$('chg_title').value,'External update');
+  // All requests below use the isolated fetch stub; no NAS scans or saves.
+  memory.clear();const safety=harness();
+  const cancelledRoot=safety.run('startScan()');
+  assert.equal(safety.calls.length,0);assert.equal(safety.$('actionAccept').textContent,'전체 스캔 시작');
+  assert.match(safety.$('actionMessage').textContent,/8만/);
+  safety.run('resolveAction(false)');await cancelledRoot;assert.equal(safety.calls.length,0);
+  const escapedRoot=safety.run('startScan()');safety.$('actionDialog').listeners.cancel({preventDefault(){}});
+  await escapedRoot;assert.equal(safety.calls.length,0);
+  safety.run("pendingFolder='Album';confirmFolder()");
+  await safety.run('startScan()');await safety.run('pollJobs()');
+  assert.equal(safety.calls.filter(c=>c.url==='/api/scan').length,1);
+  assert.equal(safety.$('actionDialog').open,false); // Individual folder has no warning.
+  safety.context.job={id:'folder-job',sub_path:'Album',results:[{path:'Album/a.mp3',original:{title:'Original',revision:'a'.repeat(64)},candidates:[]}]};
+  safety.run('adoptJob(job)');safety.$('chg_title').value='Unsaved';safety.$('chg_title').listeners.input();
+  const continueEdit=safety.run('discardDraft()');assert.equal(safety.$('actionCancel').textContent,'계속 편집');
+  assert.equal(safety.$('actionAccept').textContent,'편집 취소');
+  safety.run('resolveAction(false)');await continueEdit;assert.equal(safety.$('chg_title').value,'Unsaved');
+  const callsBeforeCancel=safety.calls.length,discard=safety.run('discardDraft()');safety.run('resolveAction(true)');await discard;
+  assert.equal(safety.calls.length,callsBeforeCancel);assert.equal(safety.$('chg_title').value,'Original');
+  safety.context.report={saved:2,skipped:3,failed:1,partial:1,state_error:'state error',results:[
+    {path:'long/<script>.mp3',status:'failed',message:'bad <tag>',warning:'warning',rename_error:'rename error'},
+    {path:'part.mp3',status:'partial',rename_error:'name conflict'},
+    {path:'skip.mp3',status:'skipped',reason:'no_selection'}]};
+  safety.run('reportSave(report)');assert.equal(safety.$('saveResultDialog').open,true);
+  assert.match(safety.$('saveResultCounts').innerHTML,/저장: 2/);
+  assert.match(safety.$('saveResultCounts').innerHTML,/일부 처리: 1/);
+  assert.match(safety.$('saveResultIssues').innerHTML,/&lt;script&gt;/);
+  assert(!safety.$('saveResultIssues').innerHTML.includes('<script>'));
+  assert.match(safety.$('saveResultIssues').innerHTML,/warning \/ rename error/);
+  assert.equal(safety.$('saveResultState').textContent,'state error');
+  assert(html.includes('overflow-wrap:anywhere'));assert(html.includes('max-height:280px;overflow:auto'));
+  safety.$('fileFilter').value='a.mp3';safety.run('applyFilter();persistView()');
+  const reload=harness();reload.context.jobsResponse=[{id:'other',sub_path:'Other',results:[]},safety.context.job];
+  await reload.run('pollJobs()');assert.equal(reload.$('subPath').value,'Album');
+  assert.equal(reload.$('folderToggle').textContent,'Album ▼');
+  assert.equal(reload.run('displayedJobId'),'folder-job');assert.equal(reload.run('editingResult.path'),'Album/a.mp3');
+  assert.equal(reload.$('fileFilter').value,'a.mp3');
+  reload.run("pendingFolder='Unscanned';confirmFolder()");assert.equal(reload.run('currentResults.length'),0);
+  const emptyReload=harness();emptyReload.context.jobsResponse=reload.context.jobsResponse;
+  await emptyReload.run('pollJobs()');assert.equal(emptyReload.$('subPath').value,'Unscanned');
+  assert.equal(emptyReload.run('currentResults.length'),0);assert.equal(emptyReload.run('editingResult'),null);
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size);
   assert(html.indexOf('id="scanControls"')<html.indexOf('id="fileColumn"'));
   assert(html.indexOf('id="scanControls"')<html.indexOf('파일 목록 <span'));
