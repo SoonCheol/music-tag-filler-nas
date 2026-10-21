@@ -137,17 +137,15 @@ function result(path) {
   assert.match($('candidateFeedback').textContent,/후보 정보가 적용되었습니다/);
   assert.match($('candidateFeedback').textContent,/파일 저장 전/);
   assert.match($('chg_title').style.boxShadow,/2px/);
-  run('applySelectedCandidate()');
+  run('applyCandidate(editingResult,editingResult.candidates[0])');
   assert.match($('candidateFeedback').textContent,/현재 입력값과 같아/);
   assert.equal(sent.length,callsBeforeApply);
-  $('onlyEmpty').checked=true;run('applySelectedCandidate()');
+  $('onlyEmpty').checked=true;run('applyCandidate(editingResult,editingResult.candidates[0])');
   assert.match($('candidateFeedback').textContent,/빈 태그만 채우기/);
-  run('editingResult._candidateId=null;applySelectedCandidate()');
-  assert.match($('candidateFeedback').textContent,/적용할 후보가 없습니다/);
   run('editingResult._draft=originalValues(editingResult);applyCandidate(editingResult,{id:"empty"})');
   assert.match($('candidateFeedback').textContent,/적용할 태그 정보가 없는/);
   assert.equal(run('Object.keys(buttonHelp).length'),6);
-  assert.match(run('buttonHelp.btnApplyCandidate'),/아직 저장하지 않습니다/);
+  assert.match(run('buttonHelp.btnApplyCandidate'),/실제 파일은 변경하지 않습니다/);
   assert.match(run('buttonHelp.btnRestore'),/실제 음악 파일/);
   for(const id of run('Object.keys(buttonHelp)')){
     assert.equal(typeof $(id).listeners.mouseenter,'function');
@@ -172,5 +170,37 @@ function result(path) {
   }
   const saveHandler=script.slice(script.indexOf('async function submitSave'),script.indexOf('async function saveCurrent'));
   assert(!/\bconfirm\(/.test(saveHandler));
+  // Preview only reads drafts: all request counts and save payloads stay unchanged.
+  $('fileFilter').value='';$('onlyEmpty').checked=false;run('adoptJob(previewJob)');
+  const previewCalls=sent.length;
+  run('applyCandidate(editingResult,editingResult.candidates[0])');
+  assert.equal($('cur_title').textContent,'Original');
+  const draftPayload=run('JSON.stringify(saveItem(editingResult))');
+  run('toggleTagPreview()');
+  assert.equal($('btnApplyCandidate').textContent,'미리보기 취소');
+  assert.equal($('cur_title').textContent,'First');assert.equal($('cur_title').style.color,'#c62828');
+  assert.equal($('tagPreviewLabel').hidden,false);
+  assert.equal(run('JSON.stringify(saveItem(editingResult))'),draftPayload);
+  $('chg_title').value='Manual draft';$('chg_title').listeners.input();
+  assert.equal($('cur_title').textContent,'Manual draft');
+  const titleCheck=checks.find(c=>c.dataset.field==='title');titleCheck.checked=false;titleCheck.listeners.change();
+  assert.equal($('cur_title').textContent,'Original');assert.equal($('cur_title').style.color,'');
+  titleCheck.checked=true;titleCheck.listeners.change();
+  $('onlyEmpty').checked=true;run('updateSavePreview()');assert.equal($('cur_title').textContent,'Original');
+  $('onlyEmpty').checked=false;run('updateSavePreview()');
+  run('toggleTagPreview()');assert.equal($('cur_title').textContent,'Original');
+  assert.equal($('chg_title').value,'Manual draft');assert.equal($('tagPreviewLabel').hidden,true);
+  run('editingResult._coverId="local-cover";editingResult.original.has_cover=true');
+  $('onlyEmpty').checked=true;run('toggleTagPreview()');
+  assert(!/uploaded-cover/.test($('currentCover').innerHTML));
+  $('onlyEmpty').checked=false;run('updateSavePreview()');
+  assert.match($('currentCover').innerHTML,/uploaded-cover\/local-cover/);
+  run('toggleTagPreview()');assert(!/uploaded-cover/.test($('currentCover').innerHTML));
+  assert.equal(sent.length,previewCalls);
+  run('toggleTagPreview();selectFile(1)');assert.equal($('btnApplyCandidate').textContent,'미리보기');
+  assert.equal($('tagPreviewLabel').hidden,true);
+  assert(!html.includes('>선택 적용</button>'));assert(!html.includes('onclick="applySelectedCandidate()"'));
+  const currentSection=html.slice(html.indexOf('<h4>현재 태그 정보'),html.indexOf('<h4><label>'));
+  assert(!currentSection.includes('<input'));assert(!currentSection.includes('저장 전'));
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

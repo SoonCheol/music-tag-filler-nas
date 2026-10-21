@@ -170,8 +170,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert(modal.includes('id="fillLyrics"> 없는 가사 추가'));
   assert(modal.includes('title="기존 태그 값은 유지하고 비어 있는 항목만 채웁니다."'));
   assert(modal.includes('title="저장할 때 기존 가사가 없는 파일에 검증된 가사를 검색하여 추가합니다."'));
-  const saveButtons=html.slice(html.indexOf('onclick="applySelectedCandidate()"'),html.indexOf('id="lyricStatus"'));
-  const buttonOrder=['applySelectedCandidate()','saveCurrent()','saveAll()','resetChange()','openSaveOptions()'].map(fn=>saveButtons.indexOf(fn));
+  const saveButtons=html.slice(html.indexOf('onclick="toggleTagPreview()"'),html.indexOf('id="lyricStatus"'));
+  const buttonOrder=['toggleTagPreview()','saveCurrent()','saveAll()','resetChange()','openSaveOptions()'].map(fn=>saveButtons.indexOf(fn));
   assert(buttonOrder.every((index,i)=>index>=0&&(!i||index>buttonOrder[i-1])));
   console.log('PASS: temporary/confirmed folder selection; persistent tree; modal apply/cancel/Escape/validation/remember; control order, centered full-width grid and aligned panels; P2 handlers preserved.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
