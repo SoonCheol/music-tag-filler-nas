@@ -11,3 +11,7 @@ configuration rather than desktop bundles. Pipeline preference typing and error
 logging no longer depend on desktop modules. Search algorithms remain upstream.
 NAS orchestration, stricter auto-selection, image validation/cache, transactional
 storage, backup integrity, and read-only protections live outside these files.
+
+NAS tag writing adds an optional text-field mask so unchanged fields/identifiers
+are preserved when committing a partial edit. Default upstream callers retain
+the full-field behavior.

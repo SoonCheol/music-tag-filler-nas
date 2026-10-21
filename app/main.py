@@ -557,7 +557,7 @@ def save_one(result, item, request, lyric_context=None):
         else:
             cover, asset_errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country)
         if cover:
-            cover, _ = original_tags.prepare_cover(cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
+            cover = storage.prepare_cover_change(cover, current.cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
     lyrics = None
     lyrics_status = "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:
@@ -630,6 +630,8 @@ def save_job(job_id: str, request: SaveRequest):
         job["save_status"], job["saved_count"] = status, saved
         response = {"status": status, "scope": request.scope, "requested": len(paths),
                     "saved": saved, "skipped": skipped, "failed": failed, "partial": partial,
+                    "unchanged": sum(o.get("reason") == "unchanged" for o in outcomes),
+                    "unselected": sum(o.get("reason") == "no_selection" for o in outcomes),
                     "results": outcomes,
                     "errors": [o for o in outcomes if o["status"] in ("failed", "partial")]}
         try:

@@ -487,21 +487,22 @@ def _read_mp4(mp4) -> tuple[Tags, bytes | None, str]:
 
 # ------------------------------------------------------------------ writing
 def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: str = "image/jpeg",
-               ids: Ids | None = None, replace_ids: bool = False, lyrics: str | None = None) -> None:
+               ids: Ids | None = None, replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
     """Write the seven text fields; replace the cover when `cover` is given.
     Empty text fields are removed from the file. `ids` adds the identity tags
     (kept as they are when None); replace_ids makes the file hold exactly `ids`.
+    `fields`: None writes all text fields; a set updates only those named fields.
     `lyrics`: None keeps the file's lyrics, "" removes them, text replaces them."""
     fmt, audio = _open(path)
     try:
         if fmt == "MP3":
-            _write_id3(audio, tags, cover, cover_mime, ids, replace_ids, lyrics)
+            _write_id3(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
         elif fmt == "FLAC":
-            _write_flac(audio, tags, cover, cover_mime, ids, replace_ids, lyrics)
+            _write_flac(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
         elif fmt == "M4A":
-            _write_mp4(audio, tags, cover, cover_mime, ids, replace_ids, lyrics)
+            _write_mp4(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
         else:
-            _write_ogg(audio, tags, cover, cover_mime, ids, replace_ids, lyrics)
+            _write_ogg(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
     except PermissionError as exc:
         raise FileLocked(path) from exc
     except OSError as exc:
@@ -513,7 +514,7 @@ def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: st
 
 
 def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
-               replace_ids: bool = False, lyrics: str | None = None) -> None:
+               replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
     if mp3.tags is None:
         mp3.add_tags()
     id3: ID3 = mp3.tags
@@ -523,26 +524,39 @@ def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | 
         "TPE2": (TPE2, tags.album_artist), "TDRC": (TDRC, tags.year), "TRCK": (TRCK, tags.track),
         "TCON": (TCON, tags.genre),
     }
+    field_names = dict(zip(frames, ("title", "artist", "album", "album_artist", "year", "track", "genre")))
     for key, (cls, value) in frames.items():
+        if fields is not None and field_names[key] not in fields:
+            continue
         id3.delall(key)
         if value:
             id3.add(cls(encoding=3, text=[value]))
-    id3.delall("TYER")  # TDRC becomes TYER when converting to v2.3
+    if fields is None or "year" in fields:
+        id3.delall("TYER")  # TDRC becomes TYER when converting to v2.3
     if cover is not None:
         id3.delall("APIC")
         id3.add(APIC(encoding=0, mime=mime, type=3, desc="Cover", data=cover))
     _set_lyrics("MP3", id3, lyrics)
+    preserved_sort = [frame for key in ("TSOP", "TSO2") for frame in id3.getall(key)] if ids is None else []
     id3.update_to_v23()
-    _set_ids_id3(id3, final_ids)
+    if ids is not None:
+        _set_ids_id3(id3, final_ids)
+    else:
+        # v2.3 conversion removes these existing sort frames: retain their original objects.
+        for frame in preserved_sort:
+            id3.add(frame)
     mp3.save(v2_version=3, v1=1)
 
 
-def _vorbis_set(vc, tags: Tags) -> None:
+def _vorbis_set(vc, tags: Tags, fields: set[str] | None = None) -> None:
     mapping = {
         "title": tags.title, "artist": tags.artist, "album": tags.album, "albumartist": tags.album_artist,
         "date": tags.year, "tracknumber": tags.track, "genre": tags.genre,
     }
+    field_names = {"albumartist": "album_artist", "date": "year", "tracknumber": "track"}
     for key, value in mapping.items():
+        if fields is not None and field_names.get(key, key) not in fields:
+            continue
         if key in vc:
             del vc[key]
         if value:
@@ -567,10 +581,10 @@ def _picture(cover: bytes, mime: str) -> Picture:
 
 
 def _write_flac(flac: FLAC, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
-                replace_ids: bool = False, lyrics: str | None = None) -> None:
+                replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
     if flac.tags is None:
         flac.add_tags()
-    _vorbis_set(flac.tags, tags)
+    _vorbis_set(flac.tags, tags, fields)
     _set_lyrics("FLAC", flac.tags, lyrics)
     if ids is not None:
         _set_ids_vorbis(flac.tags, _final_ids("FLAC", flac.tags, ids, replace_ids))
@@ -581,10 +595,10 @@ def _write_flac(flac: FLAC, tags: Tags, cover: bytes | None, mime: str, ids: Ids
 
 
 def _write_ogg(ogg: OggVorbis, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
-               replace_ids: bool = False, lyrics: str | None = None) -> None:
+               replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
     if ogg.tags is None:
         ogg.add_tags()
-    _vorbis_set(ogg.tags, tags)
+    _vorbis_set(ogg.tags, tags, fields)
     _set_lyrics("OGG", ogg.tags, lyrics)
     if ids is not None:
         _set_ids_vorbis(ogg.tags, _final_ids("OGG", ogg.tags, ids, replace_ids))
@@ -596,7 +610,7 @@ def _write_ogg(ogg: OggVorbis, tags: Tags, cover: bytes | None, mime: str, ids: 
 
 
 def _write_mp4(mp4: MP4, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
-               replace_ids: bool = False, lyrics: str | None = None) -> None:
+               replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
     if mp4.tags is None:
         mp4.add_tags()
     _set_lyrics("M4A", mp4.tags, lyrics)
@@ -606,16 +620,20 @@ def _write_mp4(mp4: MP4, tags: Tags, cover: bytes | None, mime: str, ids: Ids | 
         "\xa9nam": tags.title, "\xa9ART": tags.artist, "\xa9alb": tags.album, "aART": tags.album_artist,
         "\xa9day": tags.year, "\xa9gen": tags.genre,
     }
+    field_names = dict(zip(mapping, ("title", "artist", "album", "album_artist", "year", "genre")))
     for key, value in mapping.items():
+        if fields is not None and field_names[key] not in fields:
+            continue
         if key in mp4.tags:
             del mp4.tags[key]
         if value:
             mp4.tags[key] = [value]
-    if "trkn" in mp4.tags:
-        del mp4.tags["trkn"]
-    n, total = parse_track(tags.track)
-    if n:
-        mp4.tags["trkn"] = [(n, total)]
+    if fields is None or "track" in fields:
+        if "trkn" in mp4.tags:
+            del mp4.tags["trkn"]
+        n, total = parse_track(tags.track)
+        if n:
+            mp4.tags["trkn"] = [(n, total)]
     if cover is not None:
         fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
         mp4.tags["covr"] = [MP4Cover(cover, imageformat=fmt)]

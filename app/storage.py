@@ -191,6 +191,18 @@ def ensure_backup(path, root, backup_root, expected):
             shutil.rmtree(temporary)
 
 
+def prepare_cover_change(data, current, max_px=1000):
+    """Keep an identical embedded image unless the requested size requires resizing."""
+    if data == current:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as image:
+            if max(image.size) <= max_px:
+                return None
+    prepared, _ = tags.prepare_cover(data, max_px)
+    return None if prepared == current else prepared
+
+
 def save(path, root, backup_root, values, fields, only_empty, expected,
          cover=None, lyrics=None, rename=False, ids=None):
     if revision(path) != expected:
@@ -208,9 +220,7 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
         final_ids = info.ids.merged_over(ids) if only_empty else ids.merged_over(info.ids)
     prepared = None
     if cover is not None and not (only_empty and info.cover is not None):
-        prepared, _ = tags.prepare_cover(cover)
-        if prepared == info.cover:
-            prepared = None
+        prepared = prepare_cover_change(cover, info.cover)
     # Existing real lyrics are never replaced. Player markers can be replaced
     # only by a validated fetched lyric; the P0 first backup preserves the marker.
     if (info.lyrics.strip() and not search_lyrics.marker_only(info.lyrics)) or not lyrics or lyrics.strip() == info.lyrics.strip():
@@ -220,38 +230,45 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
         return {"status": "skipped", "reason": "unchanged", "original": describe(path), "path": str(path.relative_to(root))}
     writable(path)
     folder, manifest = ensure_backup(path, root, backup_root, expected)
-    fd, name = tempfile.mkstemp(prefix=".tagtxn-", suffix=path.suffix, dir=path.parent)
-    os.close(fd)
-    stage = Path(name)
-    try:
-        shutil.copyfile(path, stage)
-        tags.write_file(str(stage), new_tags, prepared, "image/jpeg", ids=final_ids, replace_ids=True, lyrics=lyrics)
-        verified = tags.read_file(str(stage))
-        if verified.tags != new_tags or (lyrics is not None and verified.lyrics != lyrics.strip()):
-            raise StorageError("저장 검증 실패: 원본 파일을 변경하지 않았습니다")
-        if verified.ids != final_ids:
-            raise StorageError("식별자 저장 검증 실패: 원본 파일을 변경하지 않았습니다")
-        if prepared is not None and verified.cover != prepared:
-            raise StorageError("표지 저장 검증 실패")
-        if prepared is None and verified.cover != info.cover:
-            raise StorageError("기존 표지가 변경되어 저장을 차단했습니다")
-        if lyrics is None and verified.lyrics != info.lyrics:
-            raise StorageError("기존 가사가 변경되어 저장을 차단했습니다")
-        raw = path.read_bytes()
-        fmt = tags.format_of(str(path))
-        _, _, layout = tags._layout(raw, fmt)
-        if tags._audio_bytes(stage.read_bytes(), fmt, layout) != tags._audio_bytes(raw, fmt, layout):
-            raise StorageError("오디오 무결성 검증 실패")
-        if revision(path) != expected:
-            raise StorageError("저장 도중 원본이 변경되었습니다")
-        os.chmod(stage, stat.S_IMODE(path.stat().st_mode))
-        with stage.open("rb") as stream:
-            os.fsync(stream.fileno())
-        os.replace(stage, path)
-    finally:
-        stage.unlink(missing_ok=True)
+    changed_fields = {field for field in final if final[field] != info.tags.as_dict()[field]}
+    content_changed = bool(changed_fields or final_ids != info.ids or prepared is not None or lyrics is not None)
+    if content_changed:
+        fd, name = tempfile.mkstemp(prefix=".tagtxn-", suffix=path.suffix, dir=path.parent)
+        os.close(fd)
+        stage = Path(name)
+        try:
+            shutil.copyfile(path, stage)
+            tags.write_file(str(stage), new_tags, prepared, "image/jpeg",
+                            ids=final_ids if final_ids != info.ids else None, replace_ids=True,
+                            lyrics=lyrics, fields=changed_fields)
+            verified = tags.read_file(str(stage))
+            if verified.tags != new_tags or (lyrics is not None and verified.lyrics != lyrics.strip()):
+                raise StorageError("저장 검증 실패: 원본 파일을 변경하지 않았습니다")
+            if verified.ids != final_ids:
+                raise StorageError("식별자 저장 검증 실패: 원본 파일을 변경하지 않았습니다")
+            if prepared is not None and verified.cover != prepared:
+                raise StorageError("표지 저장 검증 실패")
+            if prepared is None and verified.cover != info.cover:
+                raise StorageError("기존 표지가 변경되어 저장을 차단했습니다")
+            if lyrics is None and verified.lyrics != info.lyrics:
+                raise StorageError("기존 가사가 변경되어 저장을 차단했습니다")
+            raw = path.read_bytes()
+            fmt = tags.format_of(str(path))
+            _, _, layout = tags._layout(raw, fmt)
+            if tags._audio_bytes(stage.read_bytes(), fmt, layout) != tags._audio_bytes(raw, fmt, layout):
+                raise StorageError("오디오 무결성 검증 실패")
+            if revision(path) != expected:
+                raise StorageError("저장 도중 원본이 변경되었습니다")
+            os.chmod(stage, stat.S_IMODE(path.stat().st_mode))
+            with stage.open("rb") as stream:
+                os.fsync(stream.fileno())
+            os.replace(stage, path)
+        finally:
+            stage.unlink(missing_ok=True)
     rename_error = None
     if rename:
+        if not content_changed and revision(path) != expected:
+            raise StorageError("이름 변경 직전 파일이 변경되었습니다")
         target = tags.rename_target(str(path), new_tags)
         if target:
             # Preserve the original backup location, add a verified path alias,

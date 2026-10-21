@@ -500,7 +500,9 @@ function saveItem(r){
     values:{...r._draft},fields:[...r._fields],include_cover:!!r._coverId||(!!r._candidateId&&r._fields.length>0),cover_id:r._coverId||null,include_ids:$('includeIds').checked};
 }
 function reportSave(res){
-  $('saveResultCounts').innerHTML=`<span>저장: ${esc(res.saved)}</span><span>변경 없음·미선택: ${esc(res.skipped)}</span><span>실패: ${esc(res.failed)}</span><span>일부 처리: ${esc(res.partial)}</span>`;
+  const unchanged=res.unchanged??(res.results||[]).filter(o=>o.reason==='unchanged').length;
+  const unselected=res.unselected??(res.results||[]).filter(o=>o.reason==='no_selection').length;
+  $('saveResultCounts').innerHTML=`<span>저장: ${esc(res.saved)}</span><span>변경 없음: ${esc(unchanged)}</span><span>미선택: ${esc(unselected)}</span><span>실패: ${esc(res.failed)}</span><span>일부 처리: ${esc(res.partial)}</span>`;
   $('saveResultState').textContent=res.state_error||'';
   const reasonLabels={no_selection:'후보·수동 편집 미선택',unchanged:'변경 없음'};
   const issues=(res.results||[]).filter(o=>o.status==='failed'||o.status==='partial'||o.message||o.warning||o.rename_error||o.reason);

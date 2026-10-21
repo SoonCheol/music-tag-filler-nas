@@ -249,5 +249,7 @@ function result(path) {
     $('onlyEmpty').checked=true;run('updateSavePreview()');
     $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_artist').textContent,'My manual band');
   }
+  run('reportSave({saved:1,skipped:2,failed:0,partial:0,unchanged:1,unselected:1,results:[]})');
+  assert.match($('saveResultCounts').innerHTML,/변경 없음: 1/);assert.match($('saveResultCounts').innerHTML,/미선택: 1/);
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

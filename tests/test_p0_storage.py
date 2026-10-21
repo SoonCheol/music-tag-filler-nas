@@ -166,6 +166,65 @@ class P0Tests(unittest.TestCase):
         self.assertFalse(Path(tags.backup_path(str(path))).exists())
         self.assertFalse(self.backups.exists())
 
+    def test_complete_noop_and_rename_only_do_not_rewrite(self):
+        for extension in ("mp3", "flac", "m4a", "ogg"):
+            with self.subTest(extension=extension):
+                path = self.copy("Original singer - Original song." + extension)
+                info = tags.read_file(str(path))
+                values = {field: info.tags.as_dict()[key] for field, key in storage.FIELDS.items()}
+                before, modified = path.read_bytes(), path.stat().st_mtime_ns
+                with patch.object(tags, "write_file", side_effect=AssertionError("no-op must not write")):
+                    outcome = storage.save(path, self.root, self.backups, values, list(values), False,
+                                           storage.revision(path), cover=info.cover, lyrics=info.lyrics,
+                                           rename=True, ids=info.ids)
+                self.assertEqual((outcome["status"], outcome["reason"]), ("skipped", "unchanged"))
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(path.stat().st_mtime_ns, modified)
+                self.assertFalse(Path(tags.backup_path(str(path))).exists())
+                other = self.copy("rename-only." + extension)
+                before, modified = other.read_bytes(), other.stat().st_mtime_ns
+                with patch.object(tags, "write_file", side_effect=AssertionError("rename-only must not write")):
+                    outcome = storage.save(other, self.root, self.backups, {}, [], False,
+                                           storage.revision(other), rename=True)
+                target = self.root / outcome["path"]
+                self.assertEqual(outcome["status"], "saved")
+                self.assertEqual(target.read_bytes(), before)
+                self.assertEqual(target.stat().st_mtime_ns, modified)
+                storage.restore(target, self.root, self.backups, storage.revision(target))
+                self.assertEqual(target.read_bytes(), before)
+
+    def test_http_same_and_unselected_are_separate_without_writes(self):
+        paths = [self.copy("same.mp3"), self.copy("no-result.mp3")]
+        before = [(path.read_bytes(), path.stat().st_mtime_ns) for path in paths]
+        results = self.job(paths)
+        info = tags.read_file(str(paths[0]))
+        values = {field: info.tags.as_dict()[key] for field, key in storage.FIELDS.items()}
+        results[1]["candidates"] = []
+        items = [self.item(results[0], values=values, fields=list(values)),
+                 self.item(results[1], selection="none")]
+        with patch.object(tags, "write_file", side_effect=AssertionError("unchanged HTTP must not write")):
+            response = self.http(self.request(items, scope="all", rename=False))
+        self.assertEqual((response["saved"], response["skipped"], response["unchanged"], response["unselected"]), (0, 2, 1, 1))
+        for path, (data, modified) in zip(paths, before):
+            self.assertEqual(path.read_bytes(), data)
+            self.assertEqual(path.stat().st_mtime_ns, modified)
+        self.assertFalse(self.backups.exists())
+
+    def test_same_png_cover_is_not_reencoded(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (24, 24), "blue").save(buffer, "PNG")
+        image = buffer.getvalue()
+        path = self.copy("same-png.mp3")
+        info = tags.read_file(str(path))
+        tags.write_file(str(path), info.tags, image, "image/png")
+        before, modified = path.read_bytes(), path.stat().st_mtime_ns
+        with patch.object(tags, "write_file", side_effect=AssertionError("identical PNG must not write")):
+            outcome = storage.save(path, self.root, self.backups, {}, [], False,
+                                   storage.revision(path), cover=image)
+        self.assertEqual(outcome["reason"], "unchanged")
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(path.stat().st_mtime_ns, modified)
+
     def test_new_lyrics_and_cover_write_for_each_format_then_exact_undo(self):
         for extension in ("mp3", "flac", "m4a", "ogg"):
             with self.subTest(extension=extension):
