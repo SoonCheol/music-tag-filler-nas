@@ -87,7 +87,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(candidateRow.onmouseenter,undefined);assert.equal(candidateRow.onmousemove,undefined);assert.equal(typeof candidateRow.onclick,'function');
   thumbnail.onmouseenter();assert.equal(hoverOnly.$('hoverPrev').style.display,'block');
   thumbnail.onmouseleave();assert.equal(hoverOnly.$('hoverPrev').style.display,'none');
-  assert.ok(html.includes('#fileListScroller{max-height:517px;overflow-y:auto}'));
+  assert.ok(html.includes('#fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}'));
   assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:32px}'));
   assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><input id="chg_album"/);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
