@@ -48,9 +48,13 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   sorting.$('fileFilter').value='b.mp3';sorting.run('applyFilter()');assert.equal(sortedPaths(),'b.mp3');assert.equal(invariant(),beforeSort);
   sorting.$('fileFilter').value='';sorting.run('applyFilter()');assert.equal(sortedPaths(),'z.mp3,c.mp3,b.mp3,a.mp3');assert.equal(invariant(),beforeSort);
   sorting.run('toggleSelectAll(true)');assert.equal(sorting.run('saveTarget().rows.length'),2);
-  assert.ok(html.includes('<span>변경태그</span><span>미리보기</span>'));
+  assert.match(html,/<h4>현재 태그 정보<\/h4>/);
+  assert.match(html,/<div class="current-cover-column"><div class="cover" id="currentCover">[\s\S]*?<\/div><div id="tagPreviewLabel" hidden><span>변경태그<\/span><span>미리보기<\/span><\/div><\/div>/);
   assert.ok(html.includes('white-space:nowrap;word-break:keep-all;overflow-wrap:normal'));
-  for(const note of ['빨간색 글씨는 저장 시 변경될 태그입니다.','미리보기는 실제 파일을 변경하지 않습니다.','커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.'])assert.ok(html.includes(note));
+  assert.match(html,/<div id="tagPreviewNote" hidden>빨간색 글씨는 저장 시 변경될 태그입니다\. 미리보기는 실제 파일을 변경하지 않습니다\.<br>커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다\.<\/div>/);
+  assert.match(html,/#tagPreviewNote\{[^}]*border-top:1px solid var\(--line\);color:#78a5d2/);
+  assert.ok(html.includes('id="changeSummary" hidden'));
+  assert.ok(html.includes('id="saveScopeInfo" hidden'));
 
   assert.ok(!html.includes('id="btnStop"'));
   assert.ok(!script.includes('async function stopScan'));

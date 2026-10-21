@@ -58,10 +58,11 @@ tr.selected{background:var(--blue-light) !important}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
  .candidate-feedback{margin-top:8px;padding:8px 10px;border:1px solid #b8cdef;border-radius:4px;background:var(--blue-light);line-height:1.7;overflow-wrap:anywhere}
 .button-tooltip{position:fixed;z-index:1000;width:320px;max-width:calc(100vw - 24px);padding:10px 12px;border:1px solid #c5cbd5;border-radius:6px;background:#fff;color:var(--text);font-size:12px;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere;box-shadow:0 4px 16px #0002;pointer-events:none}
-.current-tag-heading{display:flex;align-items:center;gap:12px;margin-bottom:8px}.current-tag-heading h4{margin-bottom:0}
+.current-cover-column{width:110px;flex-shrink:0}
+#tagPreviewNote{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);color:#78a5d2;font-size:11px;line-height:1.6}
 .sort-heading{border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;cursor:pointer;padding:4px 0;white-space:nowrap}
 .sort-heading:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-#tagPreviewLabel{flex-shrink:0;color:#c62828;font-size:11px;line-height:1.5}
+#tagPreviewLabel{margin-top:6px;text-align:center;color:#c62828;font-size:11px;line-height:1.5}
 #tagPreviewLabel span{display:block;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
 </style>
 </head>
@@ -111,9 +112,9 @@ tr.selected{background:var(--blue-light) !important}
     <div class="panel">
       <div class="tag-box">
         <div class="tag-section">
-          <div class="current-tag-heading"><h4>현재 태그 정보</h4><div id="tagPreviewLabel" hidden><span>변경태그</span><span>미리보기</span></div></div>
+          <h4>현재 태그 정보</h4>
           <div style="display:flex;gap:12px">
-            <div style="width:110px;flex-shrink:0"><div class="cover" id="currentCover"><span>no image</span></div></div>
+            <div class="current-cover-column"><div class="cover" id="currentCover"><span>no image</span></div><div id="tagPreviewLabel" hidden><span>변경태그</span><span>미리보기</span></div></div>
             <div style="flex:1" class="tag-grid no-check">
               <div>제목 :</div><div id="cur_title"></div>
               <div>가수 :</div><div id="cur_artist"></div>
@@ -124,7 +125,7 @@ tr.selected{background:var(--blue-light) !important}
               <div>장르 :</div><div id="cur_genre"></div>
             </div>
           </div>
-          <div id="tagPreviewNote" hidden style="margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6"><div>빨간색 글씨는 저장 시 변경될 태그입니다.</div><div>미리보기는 실제 파일을 변경하지 않습니다.</div><div>커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.</div></div>
+          <div id="tagPreviewNote" hidden>빨간색 글씨는 저장 시 변경될 태그입니다. 미리보기는 실제 파일을 변경하지 않습니다.<br>커버 이미지 크기와 가사·파일명 등은 저장 시 최종 적용됩니다.</div>
         </div>
         <div class="tag-section">
           <h4><label><input type="checkbox" id="checkAllChange" checked onchange="toggleAllChange(this.checked)"> 변경할 태그 정보</label> <span style="font-weight:400;color:#666;font-size:11px">— 체크된 항목만 저장</span></h4>
@@ -145,8 +146,8 @@ tr.selected{background:var(--blue-light) !important}
             </div>
           </div>
           <div id="candidateFeedback" class="candidate-feedback" role="status" aria-live="polite" hidden></div>
-          <div id="changeSummary" role="status" style="margin-top:8px;line-height:1.7;color:var(--muted)">파일을 선택하면 변경 예정 내용을 표시합니다.</div>
-          <div id="saveScopeInfo" style="margin-top:4px;line-height:1.7;color:var(--muted)"></div>
+          <div id="changeSummary" hidden role="status" style="margin-top:8px;line-height:1.7;color:var(--muted)">파일을 선택하면 변경 예정 내용을 표시합니다.</div>
+          <div id="saveScopeInfo" hidden style="margin-top:4px;line-height:1.7;color:var(--muted)"></div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
             <button id="btnApplyCandidate" class="btn btn-blue" onclick="toggleTagPreview()">미리보기</button>
             <button id="btnSaveCurrent" class="btn" onclick="saveCurrent()">현재 곡 저장</button>
