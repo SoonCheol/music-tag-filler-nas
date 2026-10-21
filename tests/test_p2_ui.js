@@ -24,7 +24,7 @@ function harness() {
       else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
       else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
       else if(url==='/api/scan')value={job_id:'scan'};
-      else if(url.endsWith('/save'))value={saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
+      else if(url.endsWith('/save'))value=context.saveResponse||{saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
       return {ok:true,text:async()=>JSON.stringify(value)};
     }});
   vm.runInContext(script,context);
@@ -48,6 +48,26 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   sorting.$('fileFilter').value='b.mp3';sorting.run('applyFilter()');assert.equal(sortedPaths(),'b.mp3');assert.equal(invariant(),beforeSort);
   sorting.$('fileFilter').value='';sorting.run('applyFilter()');assert.equal(sortedPaths(),'z.mp3,c.mp3,b.mp3,a.mp3');assert.equal(invariant(),beforeSort);
   sorting.run('toggleSelectAll(true)');assert.equal(sorting.run('saveTarget().rows.length'),2);
+  const fixedOrder=sortedPaths();
+  sorting.run("currentResults.find(r=>r.path==='b.mp3').file_state='saved';currentResults.find(r=>r.path==='z.mp3').file_state='auto';renderFileList()");
+  assert.equal(sortedPaths(),fixedOrder);assert.equal(sorting.run("filteredResults.find(r=>r.path==='b.mp3')._checked"),false);
+  assert.ok(sorting.$('fileBody').children.filter(r=>r.innerHTML.includes('b.mp3')).at(-1).innerHTML.includes('disabled'));
+  sorting.run('applyFilter()');assert.equal(sortedPaths(),fixedOrder);
+  sorting.run("sortFiles('state')");assert.equal(sortedPaths(),'c.mp3,z.mp3,a.mp3,b.mp3');
+  assert.equal(sorting.run('editingResult.path'),'b.mp3');assert.equal(sorting.$('chg_title').value,'Unsaved title');
+  sorting.run("displayedJobId='sort-job';adoptJob({id:'sort-job',results:currentResults.map(r=>({...r,original:{...r.original,revision:'updated'}}))})");
+  assert.equal(sortedPaths(),'c.mp3,z.mp3,a.mp3,b.mp3');
+
+  const savedOrder=harness();
+  savedOrder.context.fixture={id:'saved-order',results:[{path:'b.mp3',file_state:'auto',_checked:true,original:{revision:'a'.repeat(64)}},{path:'a.mp3',file_state:'review',original:{revision:'a'.repeat(64)}}]};
+  savedOrder.run("adoptJob(fixture);sortFiles('state')");
+  const beforeSave=savedOrder.run("filteredResults.map(r=>r.path).join(',')");
+  savedOrder.context.saveResponse={saved:1,failed:0,skipped:0,partial:0,results:[{request_path:'b.mp3',path:'renamed.mp3',changed:true,file_state:'saved',status:'saved',original:{title:'Saved',revision:'b'.repeat(64)}}]};
+  const savingOrder=savedOrder.run('saveCurrent()');savedOrder.run('resolveAction(true)');await savingOrder;
+  assert.equal(beforeSave,'b.mp3,a.mp3');assert.equal(savedOrder.run("filteredResults.map(r=>r.path).join(',')"),'renamed.mp3,a.mp3');
+  assert.equal(savedOrder.run('selectedFileIdx'),0);assert.equal(savedOrder.run('editingResult.file_state'),'saved');
+  savedOrder.run("adoptJob({id:'saved-order',results:currentResults.map(r=>({...r}))})");
+  assert.equal(savedOrder.run("filteredResults.map(r=>r.path).join(',')"),'renamed.mp3,a.mp3');
   assert.match(html,/<h4>현재 태그 정보<\/h4>/);
   assert.match(html,/<div class="current-cover-column"><div class="cover" id="currentCover">[\s\S]*?<\/div><div id="tagPreviewLabel" hidden><span>변경태그<\/span><span>미리보기<\/span><\/div><\/div>/);
   assert.ok(html.includes('white-space:nowrap;word-break:keep-all;overflow-wrap:normal'));

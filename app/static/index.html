@@ -253,7 +253,8 @@ function adoptJob(job){
   captureCurrent();const selectedPath=editingResult?.path;
   if(displayedJobId)draftJobs.set(displayedJobId,currentResults);
   const previous=new Map((displayedJobId===job.id?currentResults:draftJobs.get(job.id)||[]).map(r=>[r.path,r]));
-  currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
+  currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||k==='_displayOrder'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
+  let nextOrder=currentResults.reduce((max,r)=>Math.max(max,r._displayOrder??-1),-1)+1;currentResults.forEach(r=>{if(r._displayOrder==null)r._displayOrder=nextOrder++;});
   if(typeof job.sub_path==='string'){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
   currentJobId=job.id;displayedJobId=job.id;lastJobSignature=jobSignature(job);editingResult=null;selectedFileIdx=-1;applyFilter();
   const index=filteredResults.findIndex(r=>r.path===selectedPath);if(index>=0)selectFile(index);persistView();
@@ -392,11 +393,12 @@ const fileNameCompare=(a,b)=>a.path.split('/').pop().localeCompare(b.path.split(
 function sortFiles(column){
   captureCurrent();
   fileSortDirection=fileSortColumn===column?-fileSortDirection:1;fileSortColumn=column;
-  renderFileList();persistView();
+  sortFileDisplay();renderFileList();persistView();
 }
 function sortFileDisplay(){
   const selected=filteredResults[selectedFileIdx];
-  if(fileSortColumn)filteredResults.sort((a,b)=>fileSortColumn==='name'?fileSortDirection*fileNameCompare(a,b):fileSortDirection*(({auto:0,review:1,saved:2}[fileState(a)])-({auto:0,review:1,saved:2}[fileState(b)]))||fileNameCompare(a,b));
+  if(fileSortColumn)currentResults.slice().sort((a,b)=>fileSortColumn==='name'?fileSortDirection*fileNameCompare(a,b):fileSortDirection*(({auto:0,review:1,saved:2}[fileState(a)])-({auto:0,review:1,saved:2}[fileState(b)]))||fileNameCompare(a,b)).forEach((r,i)=>r._displayOrder=i);
+  filteredResults.sort((a,b)=>(a._displayOrder??0)-(b._displayOrder??0));
   selectedFileIdx=selected?filteredResults.indexOf(selected):-1;
   [['name','fileNameHeader','sortFileName','파일명'],['state','fileStateHeader','sortFileState','상태']].forEach(([column,header,button,label])=>{
     const active=fileSortColumn===column;
@@ -406,7 +408,7 @@ function sortFileDisplay(){
 }
 function applyFilter(){
   captureCurrent();const selectedPath=editingResult?.path;
-  const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q));
+  const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q)).sort((a,b)=>(a._displayOrder??0)-(b._displayOrder??0));
   $('fileCount').textContent=filteredResults.length;selectedFileIdx=filteredResults.findIndex(r=>r.path===selectedPath);
   if(selectedFileIdx<0){editingResult=null;if(filteredResults.length)selectedFileIdx=0;}
   renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);
@@ -423,7 +425,7 @@ async function requestSelectFile(idx){
   if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
 }
 function renderFileList(){
-  sortFileDisplay();sanitizeChecks();const body=$('fileBody');
+  sanitizeChecks();const body=$('fileBody');
   if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
   body.innerHTML='';filteredResults.forEach((r,i)=>{
     const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장됨'}[state];
