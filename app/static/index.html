@@ -43,7 +43,7 @@ tr.selected{background:var(--blue-light) !important}
 .tag-box{padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .tag-section{border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:10px}
 .tag-section h4{margin:0 0 8px 0;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
-.tag-grid{display:grid;grid-template-columns:90px 1fr 24px;gap:6px 8px;align-items:center}
+.tag-grid{display:grid;grid-template-columns:90px 24px minmax(0,1fr);gap:6px 8px;align-items:center}
 .tag-grid.no-check{grid-template-columns:90px 1fr}
 .cover{width:110px;height:110px;border:1px solid var(--line);background:#f8f8f8;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:11px;overflow:hidden}
 .cover img{width:100%;height:100%;object-fit:cover}
@@ -68,7 +68,7 @@ tr.selected{background:var(--blue-light) !important}
 .sort-heading:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 #tagPreviewLabel{margin-top:6px;text-align:center;color:#c62828;font-size:11px;line-height:1.5}
 #tagPreviewLabel span{display:block;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
-.save-current-file{margin-top:4px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.save-current-file,.job-current-file{margin-top:4px;min-width:0;white-space:normal;overflow-wrap:anywhere;color:var(--muted)}
 .candidate-title{display:grid;grid-template-columns:32px minmax(0,1fr);gap:6px;align-items:center}
 .candidate-name{white-space:normal;overflow-wrap:anywhere;min-width:0}
 .candidate-thumb{display:flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:32px;padding:0;border:0;border-radius:3px;background:#eef1f5;color:#758196;font-size:20px;cursor:pointer;overflow:hidden}
@@ -76,6 +76,11 @@ tr.selected{background:var(--blue-light) !important}
 .cand-table td:first-child{white-space:normal;width:220px;min-width:220px}
 .change-cover-wrap{position:relative;width:110px;height:110px}
 #saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;margin:0;z-index:2;accent-color:var(--blue);box-shadow:0 0 0 2px #fff;border-radius:2px;cursor:pointer}
+#fileListScroller{max-height:517px;overflow-y:auto}
+#fileColumn thead tr{height:37px}#fileBody tr{height:32px}
+.tag-grid:not(.no-check)>label{display:flex;align-items:center;justify-content:flex-end}
+.chg-check{margin:0;width:14px;height:14px}
+.job-title{min-width:0;overflow-wrap:anywhere}.job .badge{flex-shrink:0}
 </style>
 </head>
 <body>
@@ -107,7 +112,7 @@ tr.selected{background:var(--blue-light) !important}
       <span>파일 목록 <span id="fileCount" class="badge">0</span></span>
       <span style="display:flex;gap:4px"><input id="fileFilter" class="input" style="width:120px;padding:3px 6px" placeholder="필터"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="toggleSelectAll()">전체선택</button></span>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap" id="fileListScroller">
       <table>
         <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th id="fileNameHeader" aria-sort="none"><button class="sort-heading" id="sortFileName" onclick="sortFiles('name')">파일명</button></th><th id="fileStateHeader" aria-sort="none" style="width:85px"><button class="sort-heading" id="sortFileState" onclick="sortFiles('state')">상태</button></th></tr></thead>
         <tbody id="fileBody"><tr><td colspan="4" style="text-align:center;padding:30px;color:#999">스캔을 시작하세요</td></tr></tbody>
@@ -148,13 +153,13 @@ tr.selected{background:var(--blue-light) !important}
               <div style="display:flex;gap:2px;margin-top:4px"><button class="btn" style="padding:3px;font-size:11px" onclick="$('coverFile').click()">이미지 선택</button><button class="btn" style="padding:3px;font-size:11px" onclick="applyCoverToAll()">전체 적용</button></div>
             </div>
             <div style="flex:1" class="tag-grid">
-              <div>제목 :</div><input id="chg_title" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="title" checked></label>
-              <div>가수 :</div><input id="chg_artist" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="artist" checked></label>
-              <div>앨범 :</div><input id="chg_album" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="album" checked></label>
-              <div>앨범 가수 :</div><input id="chg_albumartist" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="albumartist" checked></label>
-              <div>트랙 :</div><input id="chg_track" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="track" checked></label>
-              <div>년도 :</div><input id="chg_year" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="year" checked></label>
-              <div>장르 :</div><input id="chg_genre" class="input" style="padding:3px 6px"><label><input type="checkbox" class="chg-check" data-field="genre" checked></label>
+              <div>제목 :</div><label><input type="checkbox" class="chg-check" data-field="title" checked></label><input id="chg_title" class="input" style="padding:3px 6px">
+              <div>가수 :</div><label><input type="checkbox" class="chg-check" data-field="artist" checked></label><input id="chg_artist" class="input" style="padding:3px 6px">
+              <div>앨범 :</div><label><input type="checkbox" class="chg-check" data-field="album" checked></label><input id="chg_album" class="input" style="padding:3px 6px">
+              <div>앨범 가수 :</div><label><input type="checkbox" class="chg-check" data-field="albumartist" checked></label><input id="chg_albumartist" class="input" style="padding:3px 6px">
+              <div>트랙 :</div><label><input type="checkbox" class="chg-check" data-field="track" checked></label><input id="chg_track" class="input" style="padding:3px 6px">
+              <div>년도 :</div><label><input type="checkbox" class="chg-check" data-field="year" checked></label><input id="chg_year" class="input" style="padding:3px 6px">
+              <div>장르 :</div><label><input type="checkbox" class="chg-check" data-field="genre" checked></label><input id="chg_genre" class="input" style="padding:3px 6px">
             </div>
           </div>
           <div id="candidateFeedback" class="candidate-feedback" role="status" aria-live="polite" hidden></div>
@@ -274,6 +279,7 @@ function resetDraft(r){
 
 function adoptJob(job){
   captureCurrent();const selectedPath=editingResult?.path;
+  if(displayedJobId!==job.id)$('fileListScroller').scrollTop=0;
   if(displayedJobId)draftJobs.set(displayedJobId,currentResults);
   const previous=new Map((displayedJobId===job.id?currentResults:draftJobs.get(job.id)||[]).map(r=>[r.path,r]));
   currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||k==='_displayOrder'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
@@ -287,7 +293,7 @@ function $(id){return document.getElementById(id)}
 function api(p,o={}){return fetch(p,o).then(async r=>{const t=await r.text();let j;try{j=JSON.parse(t)}catch{j={raw:t}};if(!r.ok){const e=new Error(j.detail?.message||j.detail||t);e.status=r.status;e.detail=j.detail;throw e;}return j;});}
 function esc(s){return (s??'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let musicFolders=[],pendingFolder=$('subPath').value;
-function folderLabel(){const pending=pendingFolder!==$('subPath').value;const label=(pendingFolder||'전체')+(pending?' (임시)':'');$('folderToggle').textContent=label+' ▼';$('folderToggle').title=label;}
+function folderLabel(){const pending=pendingFolder!==$('subPath').value;const label=(pendingFolder||'전체')+(pending?' (임시)':'');$('folderToggle').textContent=label+' ▼';$('folderToggle').setAttribute('aria-label',label);}
 async function confirmFolder(event){
   event?.stopPropagation();if(pendingFolder!==$('subPath').value&&!await allowDraftMove())return;captureCurrent();$('subPath').value=pendingFolder;folderLabel();closeFolderMenu();
   const matching=allJobs.find(j=>(j.sub_path||'')===pendingFolder);
@@ -384,7 +390,7 @@ function renderSaveTasks(tasks){
     const label=task.status==='done'?'저장 완료':task.status==='failed'?'저장 중단':task.status==='queued'?'저장 대기':'저장 중';
     const counts=[task.failed?`실패 ${task.failed}개`:'',task.skipped?`건너뜀 ${task.skipped}개`:'',task.partial?`일부 처리 ${task.partial}개`:''].filter(Boolean).join(' · ');
     const row=document.createElement('div');row.className='job';
-    row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span>${task.saved} / ${task.total}개 파일 · ${label}</span><span class="badge ${task.status==='done'&&!task.failed?'badge-ok':task.failed||task.status==='failed'?'badge-warn':''}">${label}</span></div><div>${esc(counts)}</div><div class="progress" style="margin-top:4px" title="처리 ${task.processed} / ${task.total}개 파일"><div style="width:${pct}%"></div></div><div class="save-current-file" title="${esc(task.current_path||'')}">${esc(task.current_file||task.error||'')}</div>${active?'':`<div style="display:flex;gap:4px;margin-top:4px"><button class="btn" onclick="loadJob('${task.job_id}')">보기</button><button class="btn btn-red" onclick="deleteSaveTask('${task.id}')">삭제</button></div>`}`;
+    row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title">[${task.saved}/${task.total}] ${esc(task.sub_path||'전체')}</span><span class="badge ${task.status==='done'&&!task.failed?'badge-ok':task.failed||task.status==='failed'?'badge-warn':''}">${label}</span></div><div class="save-current-file" title="${esc(task.current_path||'')}">${esc(task.current_file||task.error||'')}</div><div>${esc(counts)}</div><div class="progress" style="margin-top:4px" title="처리 ${task.processed} / ${task.total}개 파일"><div style="width:${pct}%"></div></div>${active?'':`<div style="display:flex;gap:4px;margin-top:4px"><button class="btn" onclick="loadJob('${task.job_id}')">보기</button><button class="btn btn-red" onclick="deleteSaveTask('${task.id}')">삭제</button></div>`}`;
     box.appendChild(row);
   });
 }
@@ -412,7 +418,7 @@ async function pollJobs(){
         }
         if(!['scanning','queued','cancelling'].includes(j.status))btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteSpecific('${j.id}')">삭제</button>`;
         btns+=`<button class="btn" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="loadJob('${j.id}')">보기</button>`;
-        d.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span>${esc(j.id)} — ${esc(j.sub_path||'전체')} ${j.total?`— ${j.scanned}/${j.total}`:''}</span><span class="badge ${j.status==='done'?'badge-ok':j.status==='cancelled'||j.status==='interrupted'?'badge-warn':''}">${j.status}</span></div><div style="margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#666">${esc(j.current_file||'')}</div><div class="progress" style="margin-top:4px"><div style="width:${pct}%"></div></div><div style="margin-top:4px;display:flex;gap:4px">${btns}</div>`;
+        d.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title">[${j.scanned||0}/${j.total||0}] ${esc(j.sub_path||'전체')}</span><span class="badge ${j.status==='done'?'badge-ok':j.status==='cancelled'||j.status==='interrupted'?'badge-warn':''}">${j.status}</span></div><div class="job-current-file" title="${esc(j.current_file||'')}">${esc((j.current_file||'').split('/').pop())}</div><div class="progress" style="margin-top:4px"><div style="width:${pct}%"></div></div><div style="margin-top:4px;display:flex;gap:4px">${btns}</div>`;
         box.appendChild(d);
       });
     }
@@ -465,14 +471,14 @@ async function requestSelectFile(idx){
   if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
 }
 function renderFileList(){
-  sanitizeChecks();const body=$('fileBody');
+  sanitizeChecks();const body=$('fileBody'),scroller=$('fileListScroller'),scrollTop=scroller.scrollTop;
   if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
   body.innerHTML='';filteredResults.forEach((r,i)=>{
     const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장완료'}[state];
     const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';
     tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="file-state file-state-${state}">${status}</span></td>`;
     tr.onclick=()=>requestSelectFile(i);body.appendChild(tr);
-  });updateSavePreview();
+  });updateSavePreview();scroller.scrollTop=scrollTop;
 }
 function toggleCheck(i){const r=filteredResults[i];if(r&&fileState(r)==='auto')r._checked=!r._checked;renderFileList();}
 function toggleSelectAll(checked){
@@ -494,10 +500,7 @@ function selectFile(idx){
   tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
   document.querySelectorAll('.chg-check').forEach(c=>c.checked=r._fields.includes(c.dataset.field));
   const best=r.candidates?.find(c=>c.id===r._candidateId);
-  invalidateCandidateCover($('changeCover'));
-  if(best&&candidateCoverUrl(best,r)&&!($('onlyEmpty').checked&&r.original?.has_cover))paintCandidateCover($('changeCover'),best,r);
-  else $('changeCover').innerHTML=$('currentCover').innerHTML;
-  if(r._coverId){invalidateCandidateCover($('changeCover'));$('changeCover').innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}">`;}
+  renderChangeCover(r);
   showLyricsStatus(r);
   if(!searching&&r.search_status)$('statusLine').textContent=searchSummary(r);
   renderCandidates(r);updateSavePreview();persistView();
@@ -604,6 +607,14 @@ function renderCandidates(r){
     if(last&&last.getBoundingClientRect().top<=$('candidateScroller').getBoundingClientRect().bottom+80)loadNext();
   };
 }
+function renderChangeCover(r){
+  const box=$('changeCover');invalidateCandidateCover(box);
+  const original=r?.original?.has_cover?`<img src="/api/cover/${encodeURIComponent(r.path)}?v=${r.original.revision}" onerror="this.parentElement.textContent='no image'">`:'<span>no image</span>';
+  if(!r||!$('saveCover').checked||($('onlyEmpty').checked&&r.original?.has_cover)){box.innerHTML=original;return;}
+  if(r._coverId){box.innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}">`;return;}
+  const candidate=r.candidates?.find(c=>c.id===r._candidateId);
+  if(candidate&&candidateCoverUrl(candidate,r))paintCandidateCover(box,candidate,r);else box.innerHTML=original;
+}
 function applyCandidate(r,c){
   ensureDraft(r);captureCurrent();const base=originalValues(r),before={...r._draft},beforeCover=$('changeCover').innerHTML;
   const values=candidateValues(c);
@@ -613,9 +624,8 @@ function applyCandidate(r,c){
   const changed=tagFields.filter(f=>String(before[f]||'')!==String(base[f]||''));
   r._draft=base;r._dirty=true;r._manualFields=[];r._candidateId=c.id;r._selection='manual';r._appliedFields=changed;
   tagFields.forEach(f=>$('chg_'+f).value=base[f]);
-  const url=candidateCoverUrl(c,r),coverAllowed=url&&!($('onlyEmpty').checked&&r.original?.has_cover);
-  invalidateCandidateCover($('changeCover'));
-  if(coverAllowed)paintCandidateCover($('changeCover'),c,r);else $('changeCover').innerHTML=$('currentCover').innerHTML;
+  const url=candidateCoverUrl(c,r),coverAllowed=$('saveCover').checked&&url&&!($('onlyEmpty').checked&&r.original?.has_cover);
+  renderChangeCover(r);
   const applied=changed.map(f=>fieldLabels[f]);
   if(coverAllowed&&beforeCover!==$('changeCover').innerHTML)applied.push('커버 미리보기');
   let message;
@@ -660,7 +670,7 @@ function renderTagPreview(r){
   }
   if($('currentCover').innerHTML!==html)$('currentCover').innerHTML=html;
 }
-$('saveCover').addEventListener('change',updateSavePreview);
+$('saveCover').addEventListener('change',()=>{renderChangeCover(editingResult);updateSavePreview();});
 function toggleAllChange(c){document.querySelectorAll('.chg-check').forEach(cb=>cb.checked=c);captureCurrent();updateSavePreview();}
 function saveItem(r){
   ensureDraft(r);
@@ -833,7 +843,7 @@ async function applyCoverToAll(){
     currentResults.forEach(row=>{ensureDraft(row);row._coverId=r._coverId;row._dirty=true;if(row._selection==='none'||row._selection==='auto')row._selection='edit';});editingResult=null;selectFile(filteredResults.indexOf(r));alert('전체 커버 준비 완료. 빈칸만 옵션과 저장 범위는 그대로 적용됩니다.');
   }catch(e){alert(e.message);}finally{searching=false;updateSavePreview();}
 }
-['onlyEmpty','fillLyrics','renameFiles','includeIds'].forEach(id=>$(id).addEventListener('change',()=>{captureCurrent();updateSavePreview();}));
+['onlyEmpty','fillLyrics','renameFiles','includeIds'].forEach(id=>$(id).addEventListener('change',()=>{captureCurrent();if(id==='onlyEmpty')renderChangeCover(editingResult);updateSavePreview();}));
 $('coverFile').addEventListener('change',e=>{uploadCover(e.target.files[0]);e.target.value='';});
 $('changeCover').addEventListener('dragover',e=>e.preventDefault());
 $('changeCover').addEventListener('drop',e=>{e.preventDefault();uploadCover(e.dataTransfer.files[0]);});
@@ -859,6 +869,11 @@ Object.entries(buttonHelp).forEach(([id,text])=>{
   button.addEventListener('focus',()=>showButtonTooltip(button,text));
   button.addEventListener('mouseleave',hideButtonTooltip);button.addEventListener('blur',hideButtonTooltip);button.addEventListener('click',hideButtonTooltip);
 });
+const folderPathButton=$('folderToggle');
+folderPathButton.setAttribute('aria-describedby','buttonTooltip');
+folderPathButton.addEventListener('mouseenter',()=>showButtonTooltip(folderPathButton,pendingFolder||'전체'));
+folderPathButton.addEventListener('focus',()=>showButtonTooltip(folderPathButton,pendingFolder||'전체'));
+folderPathButton.addEventListener('mouseleave',hideButtonTooltip);folderPathButton.addEventListener('blur',hideButtonTooltip);folderPathButton.addEventListener('click',hideButtonTooltip);
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideButtonTooltip();});
 loadPreferences();
 loadFolders();

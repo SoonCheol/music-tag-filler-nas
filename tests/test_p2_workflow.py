@@ -375,6 +375,7 @@ class P2Tests(unittest.TestCase):
     def test_save_progress_is_live_independent_and_counts_real_outcomes(self):
         paths=[self.copy(str(i)+'.mp3') for i in range(4)]
         rows=self.job(paths)
+        main.jobs["test"]["sub_path"]="DANCE/Temporary"
         request=main.SaveRequest(**self.request([self.item(row) for row in rows]))
         entered,release=threading.Event(),threading.Event()
         responses,errors=[],[]
@@ -401,6 +402,7 @@ class P2Tests(unittest.TestCase):
                 # Real HTTP polling stays responsive while music operation lock is held.
                 tasks=json.loads(self.raw_http('/api/save-tasks'))
                 task=tasks[0]
+                self.assertEqual(task['sub_path'],'DANCE/Temporary')
                 self.assertEqual((task['saved'],task['processed'],task['total'],task['current_file']),(1,1,4,'1.mp3'))
                 self.assertEqual(task['current_path'],str(self.root/'1.mp3'))
                 other=main.SaveRequest(**self.request([self.item(rows[3])]))

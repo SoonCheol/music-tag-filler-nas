@@ -642,6 +642,7 @@ def save_job(job_id: str, request: SaveRequest):
     task_id = str(uuid.uuid4())
     with save_tasks_lock:
         save_tasks[task_id] = {"id": task_id, "job_id": job_id, "status": "queued",
+                               "sub_path": jobs.get(job_id, {}).get("sub_path", ""),
                                "created_at": time.time(), "total": len(request.paths),
                                "saved": 0, "failed": 0, "skipped": 0, "partial": 0,
                                "processed": 0, "current_file": "", "current_path": ""}

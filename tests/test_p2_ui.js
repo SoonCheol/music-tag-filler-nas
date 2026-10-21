@@ -87,6 +87,18 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(candidateRow.onmouseenter,undefined);assert.equal(candidateRow.onmousemove,undefined);assert.equal(typeof candidateRow.onclick,'function');
   thumbnail.onmouseenter();assert.equal(hoverOnly.$('hoverPrev').style.display,'block');
   thumbnail.onmouseleave();assert.equal(hoverOnly.$('hoverPrev').style.display,'none');
+  assert.ok(html.includes('#fileListScroller{max-height:517px;overflow-y:auto}'));
+  assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:32px}'));
+  assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><input id="chg_album"/);
+  const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
+  pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});
+  pathTip.run("pendingFolder='DANCE/Fitness Latino Path Full';folderLabel()");pathTip.$('folderToggle').listeners.mouseenter();
+  assert.equal(pathTip.$('buttonTooltip').textContent,'DANCE/Fitness Latino Path Full');assert.equal(pathTip.$('buttonTooltip').hidden,false);
+  pathTip.$('folderToggle').listeners.mouseleave();assert.equal(pathTip.$('buttonTooltip').hidden,true);
+  const jobView=harness();jobView.context.jobsResponse=[{id:'internal-id',status:'scanning',sub_path:'DANCE/Dance',scanned:1,total:30,current_file:'DANCE/An extremely long music filename.mp3',results:[]}];
+  await jobView.run('pollJobs()');const jobMarkup=jobView.$('jobs').children[0].innerHTML;
+  assert.ok(jobMarkup.includes('[1/30] DANCE/Dance'));assert.ok(!jobMarkup.includes('internal-id —'));
+  assert.ok(jobMarkup.includes('class="job-current-file"'));assert.ok(jobMarkup.includes('An extremely long music filename.mp3'));memory.clear();
   const common=harness();
   common.context.commonJob={id:'common-fields',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',album:'Dance CD1',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'auto',original:{title:'Two',album:'Dance CD2',revision:'a'.repeat(64)}}]};
   common.run('adoptJob(commonJob)');
@@ -97,7 +109,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(common.run('editingResult.path'),'two.mp3');
   assert.equal(common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked,false);
   assert.equal(common.run("currentResults.every(r=>!saveItem(r).fields.includes('album'))"),true);
-  common.run("editingResult._coverId='uploaded-token'");common.$('saveCover').checked=false;common.$('saveCover').listeners.change();
+  common.run("editingResult.original.has_cover=true;editingResult._coverId='uploaded-token'");common.$('saveCover').checked=false;common.$('saveCover').listeners.change();
+  assert.ok(common.$('changeCover').innerHTML.includes('/api/cover/'));assert.ok(!common.$('changeCover').innerHTML.includes('uploaded-cover'));
   assert.equal(common.run('saveItem(editingResult).include_cover'),false);assert.equal(common.run('saveItem(editingResult).cover_id'),null);assert.equal(common.run('plannedChanges(editingResult).cover'),false);
   common.run('editingResult._coverId=null');await common.run('requestSelectFile(0)');assert.equal(common.$('actionDialog').open,undefined);
   assert.equal(common.$('saveCover').checked,false);await common.run('requestSelectFile(1)');
@@ -117,11 +130,11 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const progress=harness();
   progress.context.tasks=[{id:'first',job_id:'one',status:'saving',saved:23,total:49,processed:25,failed:1,skipped:1,partial:0,current_file:'<long>.mp3',current_path:'/music/folder/<long>.mp3'},{id:'second',job_id:'two',status:'done',saved:2,total:2,processed:2,failed:0,skipped:0,partial:0}];
   progress.run('renderSaveTasks(tasks)');
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('23 / 49개 파일'));
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('[23/49]'));
   assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('실패 1개'));
   assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('title="/music/folder/&lt;long&gt;.mp3"'));
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.indexOf('class="progress"')<progress.$('saveJobs').children[0].innerHTML.indexOf('class="save-current-file"'));
-  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('2 / 2개 파일 · 저장 완료'));
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.indexOf('class="progress"')>progress.$('saveJobs').children[0].innerHTML.indexOf('class="save-current-file"'));
+  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('[2/2]'));
   assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('badge-ok'));
 
   for(const [state,bg,fg] of [['auto','#E6F1FF','#175CD3'],['review','#FFF0D6','#A65B00'],['saved','#E4F5E9','#207245']]){
@@ -163,11 +176,15 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   savedOrder.run("adoptJob(fixture);sortFiles('state')");
   const beforeSave=savedOrder.run("filteredResults.map(r=>r.path).join(',')");
   savedOrder.context.saveResponse={saved:1,failed:0,skipped:0,partial:0,results:[{request_path:'b.mp3',path:'renamed.mp3',changed:true,file_state:'saved',status:'saved',original:{title:'Saved',revision:'b'.repeat(64)}}]};
+  const bodyModel=savedOrder.$('fileBody');let bodyMarkup=bodyModel.innerHTML;
+  Object.defineProperty(bodyModel,'innerHTML',{get(){return bodyMarkup;},set(value){bodyMarkup=value;savedOrder.$('fileListScroller').scrollTop=0;}});
+  savedOrder.$('fileListScroller').scrollTop=200;
   const savingOrder=savedOrder.run('saveCurrent()');savedOrder.run('resolveAction(true)');await savingOrder;
+  assert.equal(savedOrder.$('fileListScroller').scrollTop,200);
   assert.equal(beforeSave,'b.mp3,a.mp3');assert.equal(savedOrder.run("filteredResults.map(r=>r.path).join(',')"),'renamed.mp3,a.mp3');
   assert.equal(savedOrder.run('selectedFileIdx'),0);assert.equal(savedOrder.run('editingResult.file_state'),'saved');
   savedOrder.run("adoptJob({id:'saved-order',results:currentResults.map(r=>({...r}))})");
-  assert.equal(savedOrder.run("filteredResults.map(r=>r.path).join(',')"),'renamed.mp3,a.mp3');
+  assert.equal(savedOrder.run("filteredResults.map(r=>r.path).join(',')"),'renamed.mp3,a.mp3');assert.equal(savedOrder.$('fileListScroller').scrollTop,200);
   assert.match(html,/<h4>현재 태그 정보<\/h4>/);
   assert.match(html,/<div class="current-cover-column"><div class="cover" id="currentCover">[\s\S]*?<\/div><div id="tagPreviewLabel" hidden><span>변경태그<\/span><span>미리보기<\/span><\/div><\/div>/);
   assert.ok(html.includes('white-space:nowrap;word-break:keep-all;overflow-wrap:normal'));
