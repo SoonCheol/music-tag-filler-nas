@@ -348,6 +348,8 @@ class SaveRequest(BaseModel):
     only_empty: bool = True
     fill_lyrics: bool = False
     rename: bool = False
+    cover_max_px: Optional[int] = Field(default=None, ge=100, le=1000)
+    artist_name_preference: Literal["original", "latin"] = "original"
 
 
 class RevertRequest(BaseModel):
@@ -513,6 +515,10 @@ def save_one(result, item, request, lyric_context=None):
     if item.selection == "auto":
         # The automatic payload cannot substitute untrusted browser values.
         values = {field: str(candidate.get(field) or "") for field in item.fields}
+        if request.artist_name_preference == "latin":
+            for field, alias in (("artist", "artist_latin"), ("albumartist", "album_artist_latin")):
+                if field in item.fields and candidate.get(alias):
+                    values[field] = str(candidate[alias])
     final = current.tags.as_dict()
     for field in item.fields:
         key = storage.FIELDS[field]
@@ -551,7 +557,7 @@ def save_one(result, item, request, lyric_context=None):
         else:
             cover, asset_errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country)
         if cover:
-            cover, _ = original_tags.prepare_cover(cover, preferences.read(DATA_ROOT).cover_max_px)
+            cover, _ = original_tags.prepare_cover(cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
     lyrics = None
     lyrics_status = "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:

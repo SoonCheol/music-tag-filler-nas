@@ -250,6 +250,76 @@ class P2Tests(unittest.TestCase):
         self.http({"expected_revision": storage.revision(first)}, "/api/revert/one.mp3")
         self.assertEqual(first.read_bytes(), before[0])
 
+    def test_auto_latin_uses_verified_candidate_and_preserves_existing(self):
+        path = self.copy("auto-latin.mp3", blank=True)
+        result = self.job([path])[0]
+        candidate = {"source": "iTunes", "title": "Song", "artist": "原文", "artist_latin": "Latin Singer",
+                     "album_artist": "原文", "album_artist_latin": "Latin Album", "album": "Album"}
+        result["candidates"] = [candidate]
+        main.prepare_result(result)
+        candidate = result["candidates"][0]
+        with patch.object(main, "automatic_candidate", return_value=candidate):
+            item = self.item(result, selection="auto", candidate_id=candidate["id"],
+                             fields=["title", "artist", "albumartist"],
+                             values={"title": "forged", "artist": "forged", "albumartist": "forged"})
+            response = self.http(self.request([item], artist_name_preference="latin"))
+        self.assertEqual(response["saved"], 1)
+        info = p0.tags.read_file(str(path))
+        self.assertEqual(info.tags.artist, "Latin Singer")
+        self.assertEqual(info.tags.album_artist, "Latin Album")
+        self.assertEqual(info.tags.title, "Song")
+
+    def test_option_defaults_and_bounds(self):
+        value = preferences.Preferences().model_dump()
+        self.assertEqual(value, {"country": "KR", "recurse": True, "only_empty": True,
+                                 "fill_lyrics": False, "rename": False, "include_ids": False,
+                                 "artist_name_preference": "original", "cover_max_px": 1000})
+        for country in ("KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"):
+            self.assertEqual(preferences.Preferences(country=country).country, country)
+        for maximum in (100, 1000):
+            self.assertEqual(preferences.Preferences(cover_max_px=maximum).cover_max_px, maximum)
+        for kwargs in ({"cover_max_px": 99}, {"cover_max_px": 1001}, {"country": "XX"},
+                       {"artist_name_preference": "invalid"}, {"only_empty": "false"}):
+            with self.assertRaises(ValueError):
+                preferences.Preferences(**kwargs)
+
+    def test_request_cover_size_without_remembering_preferences(self):
+        import io
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGB", (1200, 600), "green").save(buffer, "PNG")
+        preferences.write(self.data, preferences.Preferences(cover_max_px=800))
+        settings_before = (self.data / "settings.json").read_bytes()
+        for maximum in (240, 400):
+            path = self.copy("sized" + str(maximum) + ".mp3", blank=True)
+            result = self.job([path])[0]
+            token = preferences.put_cover("test", buffer.getvalue())
+            item = self.item(result, selection="edit", cover_id=token, include_cover=True)
+            response = self.http(self.request([item], cover_max_px=maximum))
+            self.assertEqual(response["saved"], 1)
+            data = p0.tags.read_file(str(path)).cover
+            with Image.open(io.BytesIO(data)) as cover:
+                self.assertEqual(max(cover.size), maximum)
+        self.assertEqual((self.data / "settings.json").read_bytes(), settings_before)
+        legacy = main.SaveRequest(**self.request([item]))
+        self.assertIsNone(legacy.cover_max_px)
+        for maximum in (99, 1001):
+            self.http(self.request([item], cover_max_px=maximum), expected=422)
+
+    def test_manual_overwrite_option_and_unchecked_field(self):
+        path = self.copy("options.mp3")
+        result = self.job([path])[0]
+        candidate = result["candidates"][0]
+        item = self.item(result, selection="manual", candidate_id=candidate["id"],
+                         values={"title": candidate["title"], "artist": "Unchecked"}, fields=["title"])
+        before = path.read_bytes()
+        self.assertEqual(self.http(self.request([item], only_empty=True))["skipped"], 1)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.http(self.request([item], only_empty=False))["saved"], 1)
+        info = p0.tags.read_file(str(path))
+        self.assertEqual(info.tags.title, candidate["title"])
+        self.assertEqual(info.tags.artist, "Original singer")
+
     def test_cover_invalid_scoped_expired_and_bounded(self):
         self.job([self.copy()])
         self.raw_http("/api/jobs/test/cover-upload", b"invalid", "POST", expected=400)

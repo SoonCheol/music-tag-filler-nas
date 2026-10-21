@@ -18,7 +18,7 @@ function $(id) { if (!elements.has(id)) elements.set(id, element()); return elem
 for (const field of ['title', 'artist', 'album', 'albumartist', 'track', 'year', 'genre']) {
   const check = element(); check.checked = true; check.dataset = { field }; checks.push(check);
 }
-$('onlyEmpty').checked = false;
+$('onlyEmpty').checked = false;$('coverMax').value=1000;
 const context = vm.createContext({ console, Set, Map, encodeURIComponent,
   document: { getElementById: $, createElement: element, addEventListener() {},
     querySelectorAll(selector) { return selector === '.chg-check' ? checks : []; } },
@@ -202,5 +202,33 @@ function result(path) {
   assert(!html.includes('>선택 적용</button>'));assert(!html.includes('onclick="applySelectedCandidate()"'));
   const currentSection=html.slice(html.indexOf('<h4>현재 태그 정보'),html.indexOf('<h4><label>'));
   assert(!currentSection.includes('<input'));assert(!currentSection.includes('저장 전'));
+  // Regression: selecting with fill-empty on must retain candidate values for later overwrite.
+  $('fileFilter').value='';$('onlyEmpty').checked=true;run('adoptJob(previewJob)');
+  run('applyCandidate(editingResult,editingResult.candidates[0]);toggleTagPreview()');
+  assert.equal($('chg_title').value,'First');assert.equal($('cur_title').textContent,'Original');
+  $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_title').textContent,'First');
+  $('chg_title').value='My manual title';$('chg_title').listeners.input();
+  $('onlyEmpty').checked=true;run('updateSavePreview()');assert.equal($('cur_title').textContent,'Original');
+  $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_title').textContent,'My manual title');
+  $('coverMax').value=320;await acceptSave('saveCurrent()');assert.equal(sent.at(-1).body.cover_max_px,320);
+  $('searchCountry').value='TW';$('searchQ').value='Singer - Song';await run('manualSearch()');
+  assert.equal(sent.at(-1).body.country,'TW');
+  // Switching display preference changes candidate-derived values, never manually edited fields.
+  run('applyCandidate(editingResult,{id:"first",title:"First",artist:"原文",artist_latin:"Latin",albumartist:"原文",album_artist_latin:"Latin album"})');
+  run('editingResult.candidates[0].artist="原文";editingResult.candidates[0].artist_latin="Latin"');
+  $('artistPreference').value='latin';run('refreshCandidatePreference();updateSavePreview()');assert.equal($('chg_artist').value,'Latin');
+  $('chg_artist').value='My artist';$('chg_artist').listeners.input();
+  $('artistPreference').value='original';run('refreshCandidatePreference();updateSavePreview()');assert.equal($('chg_artist').value,'My artist');
+  // Automatic candidates retain server overwrite protection even when fill-empty is unchecked.
+  context.autoJob={id:'auto',results:[{...result('auto.mp3'),auto_apply:true,best:{id:'first',title:'First',artist:'Singer'}}]};
+  run('adoptJob(autoJob);toggleTagPreview()');assert.equal($('cur_title').textContent,'Original');
+  assert.match($('changeSummary').textContent,/자동 후보는 기존 값 보호/);
+  context.blankAuto={id:'blank-auto',results:[{path:'blank.mp3',original:{revision:'a'.repeat(64)},auto_apply:true,
+    best:{id:'latin-auto',title:'Song',artist:'原文',artist_latin:'Latin'},
+    candidates:[{id:'latin-auto',title:'Song',artist:'原文',artist_latin:'Latin'}]}]};
+  $('artistPreference').value='latin';run('adoptJob(blankAuto);toggleTagPreview()');
+  assert.equal($('cur_artist').textContent,'Latin');
+  $('artistPreference').value='original';run('refreshCandidatePreference();updateSavePreview()');
+  assert.equal($('cur_artist').textContent,'原文');
   console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

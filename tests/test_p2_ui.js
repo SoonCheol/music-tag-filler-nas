@@ -98,7 +98,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.context.candidate={id:'latin',title:'Song',artist:'原文',artist_latin:'Latin',albumartist:'原文',album_artist_latin:'Latin'};
   h.run('applyCandidate(editingResult,candidate)');assert.equal(h.$('chg_artist').value,'Latin');assert.equal(h.$('chg_albumartist').value,'Latin');
   const confirmedSave=h.run('saveCurrent()');h.run('resolveAction(true)');await confirmedSave;assert.equal(h.calls.at(-1).body.rename,true);
-  assert.equal(h.calls.at(-1).body.only_empty,false);assert.equal(h.calls.at(-1).body.fill_lyrics,false);
+  assert.equal(h.calls.at(-1).body.only_empty,false);assert.equal(h.calls.at(-1).body.fill_lyrics,false);assert.equal(h.calls.at(-1).body.cover_max_px,500);
   const snapshot=h.run('jobSignature(job)');h.context.job.results[0].search_generation='new-generation';
   assert.notEqual(h.run('jobSignature(job)'),snapshot);
   h.run('selectFile(1)');h.$('chg_title').value='Draft';h.run('captureCurrent()');
@@ -146,6 +146,17 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const emptyReload=harness();emptyReload.context.jobsResponse=reload.context.jobsResponse;
   await emptyReload.run('pollJobs()');assert.equal(emptyReload.$('subPath').value,'Unscanned');
   assert.equal(emptyReload.run('currentResults.length'),0);assert.equal(emptyReload.run('editingResult'),null);
+  const optionHarness=harness();
+  optionHarness.context.optionJob={id:'options',results:[{path:'one.mp3',original:{title:'Old',revision:'a'.repeat(64)},candidates:[]}]};
+  optionHarness.$('fileFilter').value='';optionHarness.run('adoptJob(optionJob)');
+  for(const enabled of [true,false]){
+    for(const id of ['onlyEmpty','fillLyrics','renameFiles','includeIds'])optionHarness.$(id).checked=enabled;
+    optionHarness.$('coverMax').value=enabled?100:1000;
+    const pending=optionHarness.run('saveCurrent()');optionHarness.run('resolveAction(true)');await pending;
+    const body=optionHarness.calls.at(-1).body;
+    assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,enabled);
+    assert.equal(body.items[0].include_ids,enabled);assert.equal(body.cover_max_px,enabled?100:1000);
+  }
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size);
   assert(html.indexOf('id="scanControls"')<html.indexOf('id="fileColumn"'));
   assert(html.indexOf('id="scanControls"')<html.indexOf('파일 목록 <span'));
