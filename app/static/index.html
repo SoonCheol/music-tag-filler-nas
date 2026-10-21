@@ -69,6 +69,11 @@ tr.selected{background:var(--blue-light) !important}
 #tagPreviewLabel{margin-top:6px;text-align:center;color:#c62828;font-size:11px;line-height:1.5}
 #tagPreviewLabel span{display:block;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
 .save-current-file{margin-top:4px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.candidate-title{display:grid;grid-template-columns:32px minmax(0,1fr);gap:6px;align-items:center}
+.candidate-name{white-space:normal;overflow-wrap:anywhere;min-width:0}
+.candidate-thumb{display:flex;align-items:center;justify-content:center;width:32px;height:32px;min-width:32px;padding:0;border:0;border-radius:3px;background:#eef1f5;color:#758196;font-size:20px;cursor:pointer;overflow:hidden}
+.candidate-thumb img{width:32px;height:32px;object-fit:cover;display:block}
+.cand-table td:first-child{white-space:normal;width:220px;min-width:220px}
 </style>
 </head>
 <body>
@@ -166,7 +171,7 @@ tr.selected{background:var(--blue-light) !important}
         </div>
         <div style="margin-top:6px">
           <div style="font-size:11px;font-weight:700;margin-bottom:4px;display:flex;justify-content:space-between"><span>검색 후보 (클릭하면 변경할 태그에 적용)</span><span><input id="searchQ" class="input" style="width:140px;padding:2px 6px" placeholder="재검색"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="manualSearch()">검색</button></span></div>
-          <div class="cand-table">
+          <div class="cand-table" id="candidateScroller" tabindex="0" aria-label="검색 후보 목록">
             <table>
               <thead><tr><th>제목</th><th>가수</th><th>앨범</th><th>년도</th><th>출처</th><th>일치도</th></tr></thead>
               <tbody id="candBody"><tr><td colspan="6" style="text-align:center;padding:12px;color:#999">파일을 선택하면 후보가 표시됩니다</td></tr></tbody>
@@ -480,6 +485,7 @@ function selectFile(idx){
   renderFileList();
   if(!r){editingResult=null;return;}ensureDraft(r);editingResult=r;
   $('cur_title').textContent=r.original?.title||r.parsed?.title||''; $('cur_artist').textContent=r.original?.artist||r.parsed?.artist||''; $('cur_album').textContent=r.original?.album||''; $('cur_track').textContent=r.original?.tracknumber||''; $('cur_year').textContent=r.original?.date||''; $('cur_genre').textContent=r.original?.genre||'';
+  invalidateCandidateCover($('currentCover'));
   $('currentCover').innerHTML=r.original?.has_cover?`<img src="/api/cover/${encodeURIComponent(r.path)}?v=${r.original.revision}" onerror="this.parentElement.textContent='no image'">`:'<span>no image</span>';
   $('cur_title').title=[r.original?.format,r.original?.bitrate?`${r.original.bitrate} kbps`:'',r.original?.sample_rate?`${r.original.sample_rate} Hz`:''].filter(Boolean).join(' / ');
   $('cur_albumartist').textContent=r.original?.albumartist||'';
@@ -487,12 +493,52 @@ function selectFile(idx){
   document.querySelectorAll('.chg-check').forEach(c=>c.checked=r._fields.includes(c.dataset.field));
   $('checkAllChange').checked=r._fields.length===tagFields.length;
   const best=r.candidates?.find(c=>c.id===r._candidateId);
-  $('changeCover').innerHTML=best&&candidateCoverUrl(best,r)&&!($('onlyEmpty').checked&&r.original?.has_cover)?`<img src="${candidateCoverUrl(best,r)}" onerror="this.parentElement.textContent='no image'">`:$('currentCover').innerHTML;
-  if(r._coverId)$('changeCover').innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}">`;
+  invalidateCandidateCover($('changeCover'));
+  if(best&&candidateCoverUrl(best,r)&&!($('onlyEmpty').checked&&r.original?.has_cover))paintCandidateCover($('changeCover'),best,r);
+  else $('changeCover').innerHTML=$('currentCover').innerHTML;
+  if(r._coverId){invalidateCandidateCover($('changeCover'));$('changeCover').innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}">`;}
   showLyricsStatus(r);
   if(!searching&&r.search_status)$('statusLine').textContent=searchSummary(r);
   renderCandidates(r);updateSavePreview();persistView();
 }
+const candidateCoverCache=new Map(),candidateCoverQueue=[];
+let candidateCoverRunning=0,candidateCoverAttempt=0,candidateListGeneration=0;
+function requestCandidateCover(c,r,retry=false,priority=false){
+  const key=candidateCoverUrl(c,r);if(!key)return Promise.resolve(null);
+  let entry=candidateCoverCache.get(key);
+  if(entry&&entry.expires<Date.now()&&entry.status!=='pending'){candidateCoverCache.delete(key);entry=null;}
+  if(entry&&!(retry&&entry.status==='failed')){
+    if(priority){entry.priority=true;const index=candidateCoverQueue.indexOf(entry);if(index>0){candidateCoverQueue.splice(index,1);candidateCoverQueue.unshift(entry);}}
+    candidateCoverCache.delete(key);candidateCoverCache.set(key,entry);return entry.promise;
+  }
+  entry={key,priority,status:'pending',expires:Infinity,url:key+(retry?'&retry='+ ++candidateCoverAttempt:'')};
+  entry.promise=new Promise(resolve=>entry.resolve=resolve);candidateCoverCache.set(key,entry);
+  if(priority)candidateCoverQueue.unshift(entry);else candidateCoverQueue.push(entry);
+  pumpCandidateCovers();return entry.promise;
+}
+function pumpCandidateCovers(){
+  while(candidateCoverRunning<3&&candidateCoverQueue.length){
+    const entry=candidateCoverQueue.shift();candidateCoverRunning++;
+    const img=document.createElement('img');entry.image=img;
+    const finish=ok=>{
+      if(entry.finished)return;entry.finished=true;entry.status=ok?'ready':'failed';entry.expires=Date.now()+(ok?600000:30000);
+      candidateCoverRunning--;entry.resolve(ok?entry.url:null);
+      for(const [key,value] of candidateCoverCache){if(candidateCoverCache.size<=32)break;if(value.status!=='pending')candidateCoverCache.delete(key);}
+      pumpCandidateCovers();
+    };
+    img.onload=()=>finish(true);img.onerror=()=>finish(false);img.src=entry.url;
+  }
+}
+function paintCandidateCover(box,c,r,retry=false){
+  const key=candidateCoverUrl(c,r);if(box._candidateCoverKey===key&&!retry)return;
+  box._candidateCoverKey=key;const token=box._candidateCoverToken=(box._candidateCoverToken||0)+1;
+  box.innerHTML='<span aria-label="커버 없음">♪</span>';
+  requestCandidateCover(c,r,retry,true).then(url=>{
+    if(box._candidateCoverToken!==token||box._candidateCoverKey!==key)return;
+    if(url)box.innerHTML=`<img src="${url}" alt="후보 커버">`;
+  });
+}
+function invalidateCandidateCover(box){box._candidateCoverKey=null;box._candidateCoverToken=(box._candidateCoverToken||0)+1;}
 let hoverCoverToken=0,hoverCoverTarget=null,hoverCoverFailed=false;
 function hideHoverCover(){hoverCoverToken++;hoverCoverTarget=null;hoverCoverFailed=false;$('hoverPrev').style.display='none';}
 function showHoverCover(c,r,retry=false){
@@ -500,20 +546,23 @@ function showHoverCover(c,r,retry=false){
   $('hoverPrev').style.display='block';$('hoverCoverImage').replaceChildren();$('hoverCoverRetry').hidden=true;
   $('hoverCoverStatus').textContent=url?'커버 불러오는 중…':'일치하는 커버가 없습니다.';
   if(!url)return;
-  const img=document.createElement('img');img.alt='후보 커버';
-  img.onload=()=>{if(token!==hoverCoverToken)return;$('hoverCoverStatus').textContent='';$('hoverCoverImage').replaceChildren(img);};
-  img.onerror=()=>{if(token!==hoverCoverToken)return;hoverCoverFailed=true;$('hoverCoverStatus').textContent='커버를 불러오지 못했습니다.';$('hoverCoverRetry').hidden=false;};
-  img.src=url+(retry?'&retry='+token:'');
+  requestCandidateCover(c,r,retry,true).then(src=>{
+    if(token!==hoverCoverToken)return;
+    if(src){const img=document.createElement('img');img.alt='후보 커버';img.src=src;$('hoverCoverStatus').textContent='';$('hoverCoverImage').replaceChildren(img);}
+    else{hoverCoverFailed=true;$('hoverCoverStatus').textContent='커버를 불러오지 못했습니다.';$('hoverCoverRetry').hidden=false;}
+  });
 }
 function retryHoverCover(){if(hoverCoverTarget)showHoverCover(hoverCoverTarget.c,hoverCoverTarget.r,true);}
 $('hoverPrev').addEventListener('mouseleave',hideHoverCover);
 function renderCandidates(r){
   hideHoverCover();
-
+  const generation=++candidateListGeneration,thumbs=[];
+  // Drop obsolete queued prefetches; already-running requests may safely fill the cache.
+  for(let index=candidateCoverQueue.length-1;index>=0;index--){const entry=candidateCoverQueue[index];if(!entry.priority){candidateCoverQueue.splice(index,1);candidateCoverCache.delete(entry.key);entry.resolve(null);}}
   const body=$('candBody'); body.innerHTML=''; if(!r.candidates||!r.candidates.length){body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:12px;color:#999">후보 없음</td></tr>';return}
   r.candidates.forEach((c,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${esc(c.title)}</td><td>${esc(c.artist)}</td><td>${esc(c.album)}</td><td>${esc(c.year)}</td><td>${esc(c.source)}</td><td>${c.score}</td>`;
+    tr.innerHTML=`<td><div class="candidate-title"><button type="button" class="candidate-thumb" id="candidateThumb${generation}-${i}" title="커버 미리보기" aria-label="커버 미리보기">♪</button><span class="candidate-name">${esc(c.title)}</span></div></td><td>${esc(c.artist)}</td><td>${esc(c.album)}</td><td>${esc(c.year)}</td><td>${esc(c.source)}</td><td>${c.score}</td>`;
     tr.onmouseenter=()=>showHoverCover(c,r);
     tr.onmousemove=(e)=>{
       const hp=$('hoverPrev');
@@ -535,7 +584,25 @@ function renderCandidates(r){
       applyCandidate(r,c);
     };
     body.appendChild(tr);
+    const thumb=$(`candidateThumb${generation}-${i}`);thumbs.push({c,thumb,tr});
+    thumb.onclick=event=>{if(thumb._coverFailed){event.stopPropagation();loadThumb(thumb,c,true);}};
   });
+  function loadThumb(thumb,c,retry=false){
+    thumb._coverFailed=false;thumb.title='커버 불러오는 중';
+    requestCandidateCover(c,r,retry).then(url=>{
+      if(generation!==candidateListGeneration)return;
+      thumb.innerHTML=url?`<img src="${url}" alt="">`:'♪';thumb._coverFailed=!url;
+      thumb.title=url?'커버 미리보기':'커버 없음 · 클릭하여 다시 시도';
+    });
+  }
+  let loaded=0;
+  function loadNext(){const end=Math.min(loaded+10,thumbs.length);for(;loaded<end;loaded++){const {c,thumb}=thumbs[loaded];loadThumb(thumb,c);}}
+  loadNext();
+  $('candidateScroller').onscroll=()=>{
+    if(loaded>=thumbs.length)return;
+    const last=thumbs[loaded-1]?.tr;
+    if(last&&last.getBoundingClientRect().top<=$('candidateScroller').getBoundingClientRect().bottom+80)loadNext();
+  };
 }
 function applyCandidate(r,c){
   ensureDraft(r);captureCurrent();const base=originalValues(r),before={...r._draft},beforeCover=$('changeCover').innerHTML;
@@ -547,7 +614,8 @@ function applyCandidate(r,c){
   r._draft=base;r._dirty=true;r._manualFields=[];r._candidateId=c.id;r._selection='manual';r._appliedFields=changed;
   tagFields.forEach(f=>$('chg_'+f).value=base[f]);
   const url=candidateCoverUrl(c,r),coverAllowed=url&&!($('onlyEmpty').checked&&r.original?.has_cover);
-  $('changeCover').innerHTML=coverAllowed?`<img src="${url}" onerror="this.parentElement.textContent='no image'">`:$('currentCover').innerHTML;
+  invalidateCandidateCover($('changeCover'));
+  if(coverAllowed)paintCandidateCover($('changeCover'),c,r);else $('changeCover').innerHTML=$('currentCover').innerHTML;
   const applied=changed.map(f=>fieldLabels[f]);
   if(coverAllowed&&beforeCover!==$('changeCover').innerHTML)applied.push('커버 미리보기');
   let message;
@@ -584,6 +652,8 @@ function renderTagPreview(r){
     $('cur_'+f).textContent=value;$('cur_'+f).style.color=changed?'#c62828':'';
   });
   let html=r?.original?.has_cover?`<img src="/api/cover/${encodeURIComponent(r.path)}?v=${r.original.revision}" onerror="this.parentElement.textContent='no image'">`:'<span>no image</span>';
+  if(active&&plan.cover&&!r._coverId&&candidate){paintCandidateCover($('currentCover'),candidate,r);return;}
+  invalidateCandidateCover($('currentCover'));
   if(active&&plan.cover){
     const url=r._coverId?`/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}`:candidate?candidateCoverUrl(candidate,r):'';
     if(url)html=`<img src="${url}" alt="커버 미리보기 — 저장 시 검증" onerror="this.parentElement.textContent='커버 미리보기 실패'">`;
@@ -693,7 +763,7 @@ async function resetChange(){
 }
 tagFields.forEach(f=>$('chg_'+f).addEventListener('input',()=>{if(editingResult){captureCurrent();editingResult._dirty=true;editingResult._manualFields=[...new Set([...(editingResult._manualFields||[]),f])];editingResult._selection='edit';editingResult._candidateFeedback=null;editingResult._appliedFields=[];updateSavePreview();}}));
 document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{captureCurrent();updateSavePreview();}));
-function candidateCoverUrl(c,r){return c.id&&(c.cover_url||c.album)?`/api/jobs/${encodeURIComponent(currentJobId)}/cover/${encodeURIComponent(c.id)}?path=${encodeURIComponent(r.path)}`:'';}
+function candidateCoverUrl(c,r){return c.id&&(c.cover_url||c.album)?`/api/jobs/${encodeURIComponent(currentJobId)}/cover/${encodeURIComponent(c.id)}?path=${encodeURIComponent(r.path)}${r.country?'&country='+encodeURIComponent(r.country):''}`:'';}
 function searchSummary(r){
   const labels={matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};
   const errors=(r.search_errors||[]).map(e=>e.source+': '+e.message).join(' / ');
