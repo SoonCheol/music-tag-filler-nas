@@ -371,3 +371,56 @@ class P2Tests(unittest.TestCase):
         rows = [{"plainLyrics": "桜の花が咲く季節にあなたを思い出す"}, {"plainLyrics": "sakura no hana ga saku kisetsu ni anata wo omoidasu " * 3}]
         preferred = main.original_lyrics._prefer_original_script(rows)
         self.assertEqual(preferred, [rows[0]])
+
+    def test_save_progress_is_live_independent_and_counts_real_outcomes(self):
+        paths=[self.copy(str(i)+'.mp3') for i in range(4)]
+        rows=self.job(paths)
+        request=main.SaveRequest(**self.request([self.item(row) for row in rows]))
+        entered,release=threading.Event(),threading.Event()
+        responses,errors=[],[]
+        original_save=main.save_one
+        def save(result,item,request,context):
+            if item.path=='0.mp3':
+                return original_save(result,item,request,context)
+            if item.path=='1.mp3':
+                entered.set()
+                if not release.wait(5):
+                    raise RuntimeError('test timed out')
+                return {'status':'skipped','reason':'unchanged','changed':False}
+            if item.path=='2.mp3':
+                return {'status':'partial','changed':True}
+            raise RuntimeError('simulated file failure')
+        def run(value):
+            try:responses.append(main.save_job('test',value))
+            except Exception as exc:errors.append(exc)
+        with main.save_tasks_lock:main.save_tasks.clear()
+        with patch.object(main,'save_one',side_effect=save):
+            worker=threading.Thread(target=run,args=(request,));worker.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                # Real HTTP polling stays responsive while music operation lock is held.
+                tasks=json.loads(self.raw_http('/api/save-tasks'))
+                task=tasks[0]
+                self.assertEqual((task['saved'],task['processed'],task['total'],task['current_file']),(1,1,4,'1.mp3'))
+                self.assertEqual(task['current_path'],str(self.root/'1.mp3'))
+                other=main.SaveRequest(**self.request([self.item(rows[3])]))
+                queued=threading.Thread(target=run,args=(other,));queued.start()
+                import time
+                for _ in range(100):
+                    tasks=main.list_save_tasks()
+                    if len(tasks)==2:break
+                    time.sleep(.01)
+                self.assertEqual(len(tasks),2)
+                self.assertEqual(len({t['id'] for t in tasks}),2)
+                waiting=next(t for t in tasks if t['id']!=task['id'])
+                self.assertEqual((waiting['status'],waiting['saved'],waiting['processed']),('queued',0,0))
+                with self.assertRaises(HTTPException):main.delete_save_task(task['id'])
+            finally:
+                release.set();worker.join(5)
+                if 'queued' in locals():queued.join(5)
+        self.assertFalse(errors)
+        finished=next(t for t in main.list_save_tasks() if t['id']==task['id'])
+        self.assertEqual((finished['status'],finished['saved'],finished['failed'],finished['skipped'],finished['partial'],finished['processed']),('done',2,1,1,1,4))
+        self.assertEqual(finished['current_file'],'')
+        main.delete_save_task(task['id'])
+        self.assertFalse(any(t['id']==task['id'] for t in main.list_save_tasks()))

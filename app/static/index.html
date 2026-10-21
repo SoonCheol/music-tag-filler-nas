@@ -68,6 +68,7 @@ tr.selected{background:var(--blue-light) !important}
 .sort-heading:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 #tagPreviewLabel{margin-top:6px;text-align:center;color:#c62828;font-size:11px;line-height:1.5}
 #tagPreviewLabel span{display:block;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}
+.save-current-file{margin-top:4px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -108,7 +109,7 @@ tr.selected{background:var(--blue-light) !important}
     <div class="status-line"><span id="selectedInfo">선택: 0곡</span><span id="progressText"></span></div>
     <div style="padding:6px"><div class="progress"><div id="progBar" style="width:0%"></div></div></div>
     <div class="panel-head">백그라운드 작업 <span style="font-weight:400;font-size:11px;color:#666">중지 버튼으로 중단 가능</span></div>
-    <div id="jobs" class="jobs"><div style="text-align:center;color:#999;padding:8px">작업 없음</div></div>
+    <div id="saveJobs" class="jobs"></div><div id="jobs" class="jobs"><div style="text-align:center;color:#999;padding:8px">작업 없음</div></div>
   </div>
 
   </div>
@@ -358,6 +359,20 @@ async function startScan(force=false){
   try{$('btnScan').disabled=true;const res=await api('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentJobId=res.job_id;persistView();pollJobs();}catch(e){if(e.status===409&&e.detail){alert(e.detail.message||'백그라운드 작업 목록에서 스캔을 중지해 주세요')}else alert(e.message)}finally{$('btnScan').disabled=false}
 }
 async function resumeScan(){if(!currentJobId) return; await api('/api/jobs/'+currentJobId+'/resume',{method:'POST'}); pollJobs();}
+function renderSaveTasks(tasks){
+  const box=$('saveJobs');box.innerHTML='';
+  tasks.forEach(task=>{
+    const active=['queued','saving'].includes(task.status),pct=task.total?Math.round(task.processed/task.total*100):0;
+    const label=task.status==='done'?'저장 완료':task.status==='failed'?'저장 중단':task.status==='queued'?'저장 대기':'저장 중';
+    const counts=[task.failed?`실패 ${task.failed}개`:'',task.skipped?`건너뜀 ${task.skipped}개`:'',task.partial?`일부 처리 ${task.partial}개`:''].filter(Boolean).join(' · ');
+    const row=document.createElement('div');row.className='job';
+    row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span>${task.saved} / ${task.total}개 파일 · ${label}</span><span class="badge ${task.status==='done'&&!task.failed?'badge-ok':task.failed||task.status==='failed'?'badge-warn':''}">${label}</span></div><div>${esc(counts)}</div><div class="progress" style="margin-top:4px" title="처리 ${task.processed} / ${task.total}개 파일"><div style="width:${pct}%"></div></div><div class="save-current-file" title="${esc(task.current_path||'')}">${esc(task.current_file||task.error||'')}</div>${active?'':`<div style="display:flex;gap:4px;margin-top:4px"><button class="btn" onclick="loadJob('${task.job_id}')">보기</button><button class="btn btn-red" onclick="deleteSaveTask('${task.id}')">삭제</button></div>`}`;
+    box.appendChild(row);
+  });
+}
+async function refreshSaveTasks(){try{renderSaveTasks(await api('/api/save-tasks'));}catch(e){}}
+async function pollSaveTasks(){await refreshSaveTasks();setTimeout(pollSaveTasks,1500);}
+async function deleteSaveTask(id){if(!confirm('저장 작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/save-tasks/'+id,{method:'DELETE'});refreshSaveTasks();}catch(e){alert(e.message)}}
 async function pollJobs(){
   try{
     const jobs=await api('/api/jobs'); allJobs=jobs;
@@ -578,7 +593,9 @@ async function submitSave(rows,scope,label){
   try{
     if(!await confirmAction('저장 전 확인',message,'저장 실행','취소'))return;
     if(currentJobId!==jobId)throw new Error('확인 중 작업이 변경되었습니다. 저장 대상을 다시 확인하세요.');
-    const res=await api('/api/jobs/'+jobId+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const saveRequest=api('/api/jobs/'+jobId+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    refreshSaveTasks();
+    const res=await saveRequest;refreshSaveTasks();
     res.results.forEach(o=>{const r=currentResults.find(r=>r.path===(o.request_path||o.path));if(!r)return;
       r.last_save=o;if(o.file_state)r.file_state=o.file_state;
       if(o.changed){r._checked=false;r._dirty=false;}
@@ -745,6 +762,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')hideButtonTooltip();
 loadPreferences();
 loadFolders();
 pollJobs();
+pollSaveTasks();
 </script>
 </body>
 </html>

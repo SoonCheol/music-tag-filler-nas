@@ -607,8 +607,56 @@ def save_one(result, item, request, lyric_context=None):
     return outcome
 
 
+# Progress has its own lock: polling must not wait for the music mutation lock.
+save_tasks = {}
+save_tasks_lock = threading.Lock()
+
+
+def update_save_task(task_id, **values):
+    with save_tasks_lock:
+        save_tasks[task_id].update(values)
+
+
+@app.get("/api/save-tasks")
+def list_save_tasks():
+    with save_tasks_lock:
+        return sorted([dict(task) for task in save_tasks.values()],
+                      key=lambda task: task["created_at"], reverse=True)
+
+
+@app.delete("/api/save-tasks/{task_id}")
+def delete_save_task(task_id: str):
+    with save_tasks_lock:
+        task = save_tasks.get(task_id)
+        if task is None:
+            raise HTTPException(404, "save task not found")
+        if task["status"] in ("queued", "saving"):
+            raise HTTPException(409, "저장 중인 작업은 삭제할 수 없습니다")
+        del save_tasks[task_id]
+    return {"status": "deleted"}
+
+
 @app.post("/api/jobs/{job_id}/save")
 def save_job(job_id: str, request: SaveRequest):
+    task_id = str(uuid.uuid4())
+    with save_tasks_lock:
+        save_tasks[task_id] = {"id": task_id, "job_id": job_id, "status": "queued",
+                               "created_at": time.time(), "total": len(request.paths),
+                               "saved": 0, "failed": 0, "skipped": 0, "partial": 0,
+                               "processed": 0, "current_file": "", "current_path": ""}
+    try:
+        response = perform_save_job(job_id, request, task_id)
+        update_save_task(task_id, status="done", finished_at=time.time(),
+                         current_file="", current_path="")
+        response["save_task_id"] = task_id
+        return response
+    except Exception as exc:
+        update_save_task(task_id, status="failed", finished_at=time.time(),
+                         current_file="", current_path="", error=str(exc))
+        raise
+
+
+def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
     with storage.OPERATION_LOCK:
         if job_id not in jobs:
             raise HTTPException(404, "job not found")
@@ -628,9 +676,13 @@ def save_job(job_id: str, request: SaveRequest):
               or set(paths) != set(request.checked_paths)
               or any(file_state(results[path]) != "auto" for path in paths)):
             raise HTTPException(400, "일괄 저장은 체크된 자동선택 곡만 지정해야 합니다")
+        update_save_task(task_id, status="saving")
         outcomes = []
+        counts = {"saved": 0, "failed": 0, "skipped": 0, "partial": 0}
         lyric_context = {"busy_streak": 0}
         for relative in paths:
+            update_save_task(task_id, current_file=Path(relative).name,
+                             current_path=str(MUSIC_ROOT / relative))
             result = results[relative]
             result.setdefault("stored_saved", file_state(result) == "saved")
             try:
@@ -651,6 +703,11 @@ def save_job(job_id: str, request: SaveRequest):
                 outcome = {"path": relative, "status": "failed", "message": str(exc)}
                 result["last_save"] = outcome
             outcomes.append(outcome)
+            if outcome["status"] in ("saved", "partial"):
+                counts["saved"] += 1
+            if outcome["status"] in ("failed", "skipped", "partial"):
+                counts[outcome["status"]] += 1
+            update_save_task(task_id, processed=len(outcomes), **counts)
         saved = sum(o["status"] in ("saved", "partial") for o in outcomes)
         skipped = sum(o["status"] == "skipped" for o in outcomes)
         failed = sum(o["status"] == "failed" for o in outcomes)

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync('app/static/index.html', 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
-  .replace(/^loadPreferences\(\);/m, '').replace(/^loadFolders\(\);/m, '').replace(/^pollJobs\(\);/m, '');
+  .replace(/^loadPreferences\(\);/m, '').replace(/^loadFolders\(\);/m, '').replace(/^pollJobs\(\);/m, '').replace(/^pollSaveTasks\(\);/m, '');
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
@@ -33,6 +33,16 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  const progress=harness();
+  progress.context.tasks=[{id:'first',job_id:'one',status:'saving',saved:23,total:49,processed:25,failed:1,skipped:1,partial:0,current_file:'<long>.mp3',current_path:'/music/folder/<long>.mp3'},{id:'second',job_id:'two',status:'done',saved:2,total:2,processed:2,failed:0,skipped:0,partial:0}];
+  progress.run('renderSaveTasks(tasks)');
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('23 / 49개 파일'));
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('실패 1개'));
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('title="/music/folder/&lt;long&gt;.mp3"'));
+  assert.ok(progress.$('saveJobs').children[0].innerHTML.indexOf('class="progress"')<progress.$('saveJobs').children[0].innerHTML.indexOf('class="save-current-file"'));
+  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('2 / 2개 파일 · 저장 완료'));
+  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('badge-ok'));
+
   for(const [state,bg,fg] of [['auto','#E6F1FF','#175CD3'],['review','#FFF0D6','#A65B00'],['saved','#E4F5E9','#207245']]){
     assert.ok(html.includes('.file-state-'+state+'{background:'+bg+';color:'+fg+'}'));
   }
@@ -163,8 +173,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.$('onlyEmpty').checked=false;
   h.context.candidate={id:'latin',title:'Song',artist:'原文',artist_latin:'Latin',albumartist:'原文',album_artist_latin:'Latin'};
   h.run('applyCandidate(editingResult,candidate)');assert.equal(h.$('chg_artist').value,'Latin');assert.equal(h.$('chg_albumartist').value,'Latin');
-  const confirmedSave=h.run('saveCurrent()');h.run('resolveAction(true)');await confirmedSave;assert.equal(h.calls.at(-1).body.rename,true);
-  assert.equal(h.calls.at(-1).body.only_empty,false);assert.equal(h.calls.at(-1).body.fill_lyrics,false);assert.equal(h.calls.at(-1).body.cover_max_px,500);
+  const confirmedSave=h.run('saveCurrent()');h.run('resolveAction(true)');await confirmedSave;assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.rename,true);
+  assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.only_empty,false);assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.fill_lyrics,false);assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.cover_max_px,500);
   const snapshot=h.run('jobSignature(job)');h.context.job.results[0].search_generation='new-generation';
   assert.notEqual(h.run('jobSignature(job)'),snapshot);
   h.run('selectFile(1)');h.$('chg_title').value='Draft';h.run('captureCurrent()');
@@ -219,7 +229,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
     for(const id of ['onlyEmpty','fillLyrics','renameFiles','includeIds'])optionHarness.$(id).checked=enabled;
     optionHarness.$('coverMax').value=enabled?100:1000;
     const pending=optionHarness.run('saveCurrent()');optionHarness.run('resolveAction(true)');await pending;
-    const body=optionHarness.calls.at(-1).body;
+    const body=optionHarness.calls.filter(c=>c.url.endsWith('/save')).at(-1).body;
     assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,enabled);
     assert.equal(body.items[0].include_ids,enabled);assert.equal(body.cover_max_px,enabled?100:1000);
   }
