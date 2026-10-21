@@ -33,6 +33,10 @@ function harness() {
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
 function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at(-1).title===title);}
 (async()=>{
+  for(const [state,bg,fg] of [['auto','#E6F1FF','#175CD3'],['review','#FFF0D6','#A65B00'],['saved','#E4F5E9','#207245']]){
+    assert.ok(html.includes('.file-state-'+state+'{background:'+bg+';color:'+fg+'}'));
+  }
+  assert.ok(html.includes('font-size:11px;line-height:1.5;white-space:nowrap;color-scheme:light'));
   const sorting=harness();
   sorting.run("currentResults=[{path:'z.mp3',file_state:'review'},{path:'b.mp3',file_state:'auto',_checked:true},{path:'a.mp3',file_state:'saved'},{path:'c.mp3',file_state:'auto',_checked:false}];filteredResults=currentResults.slice();selectFile(1)");
   sorting.$('chg_title').value='Unsaved title';
@@ -48,6 +52,11 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   sorting.$('fileFilter').value='b.mp3';sorting.run('applyFilter()');assert.equal(sortedPaths(),'b.mp3');assert.equal(invariant(),beforeSort);
   sorting.$('fileFilter').value='';sorting.run('applyFilter()');assert.equal(sortedPaths(),'z.mp3,c.mp3,b.mp3,a.mp3');assert.equal(invariant(),beforeSort);
   sorting.run('toggleSelectAll(true)');assert.equal(sorting.run('saveTarget().rows.length'),2);
+  for(const [state,label] of [['auto','자동선택'],['review','확인필요'],['saved','저장완료']]){
+    const row=sorting.$('fileBody').children.filter(r=>r.innerHTML.includes('file-state-'+state)).at(-1);
+    assert.ok(row&&row.innerHTML.includes(label));
+    assert.equal(row.innerHTML.includes('disabled'),state!=='auto');
+  }
   const fixedOrder=sortedPaths();
   sorting.run("currentResults.find(r=>r.path==='b.mp3').file_state='saved';currentResults.find(r=>r.path==='z.mp3').file_state='auto';renderFileList()");
   assert.equal(sortedPaths(),fixedOrder);assert.equal(sorting.run("filteredResults.find(r=>r.path==='b.mp3')._checked"),false);

@@ -35,6 +35,10 @@ tr.selected{background:var(--blue-light) !important}
 .badge{font-size:10px;padding:1px 5px;border-radius:3px;background:#eef;color:#334}
 .badge-warn{background:#fff3cd;color:#856404}
 .badge-ok{background:#d4edda;color:#155724}
+.file-state{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:60px;padding:2px 6px;border-radius:3px;font-size:11px;line-height:1.5;white-space:nowrap;color-scheme:light}
+.file-state-auto{background:#E6F1FF;color:#175CD3}
+.file-state-review{background:#FFF0D6;color:#A65B00}
+.file-state-saved{background:#E4F5E9;color:#207245}
 .right-wrap{display:flex;flex-direction:column;gap:10px}
 .tag-box{padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .tag-section{border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:10px}
@@ -428,9 +432,9 @@ function renderFileList(){
   sanitizeChecks();const body=$('fileBody');
   if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
   body.innerHTML='';filteredResults.forEach((r,i)=>{
-    const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장됨'}[state];
+    const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장완료'}[state];
     const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';
-    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="badge ${state==='review'?'badge-warn':'badge-ok'}">${status}</span></td>`;
+    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td title="${esc(r.path)}">${esc(r.path.split('/').pop())}</td><td><span class="file-state file-state-${state}">${status}</span></td>`;
     tr.onclick=()=>requestSelectFile(i);body.appendChild(tr);
   });updateSavePreview();
 }
@@ -718,7 +722,7 @@ $('changeCover').addEventListener('drop',e=>{e.preventDefault();uploadCover(e.da
 const buttonHelp={
   btnApplyCandidate:'아래 편집 내용을 체크 상태와 저장 옵션에 맞춰 위쪽에 미리 표시합니다. 달라지는 값은 빨간 글씨로 표시합니다.\n미리보기 취소 시 위쪽만 원래 정보로 돌아가며 아래 편집 내용과 실제 파일은 변경하지 않습니다.',
   btnSaveCurrent:'오른쪽에 표시된 현재 한 곡을 저장합니다.\n체크한 태그 항목과 저장 옵션을 반영해 실제 음악 파일을 변경합니다.',
-  btnSaveAll:'필터와 관계없이 체크된 자동선택 곡만 저장합니다. 확인필요·저장됨 곡은 제외합니다.',
+  btnSaveAll:'필터와 관계없이 체크된 자동선택 곡만 저장합니다. 확인필요·저장완료 곡은 제외합니다.',
   btnSaveSelected:'필터로 숨겨진 곡을 포함해 체크된 자동선택 곡만 저장합니다. 현재 곡 저장과 별도 범위입니다.',
   btnDiscard:'현재 곡의 미저장 편집을 버리고 편집 전 태그 값으로 돌아갑니다.\n이미 저장된 음악 파일은 변경하지 않습니다.',
   btnRestore:'주의: 실제 음악 파일을 최초 백업 당시의 내용으로 복원합니다.\n이후 저장한 변경도 되돌아갑니다. 편집 취소와 다른 기능입니다.',
