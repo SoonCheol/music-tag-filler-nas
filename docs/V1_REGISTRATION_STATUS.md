@@ -57,8 +57,21 @@ Portainer `/api/stacks`는 HTTP 401이다. 현재 연결된 브라우저가 없�
 8. 검사한 파일만 commit하고 정상 배포를 확인한 최종 커밋을 push한다.
    해당 커밋에 v1.0.0 태그/Release를 만들고 실제 결과·커밋 SHA·이미지 ID를 기록한다.
 
-현재 새 이름으로의 운영 이전과 GitHub 비공개 확인·push·태그·Release는 완료되지 않았다.
-최종 등록 전에 이 문서의 대기 상태를 실제 검증 결과로 갱신한다.
+## GitHub 등록 완료 — 2026-10-21
+
+SoonCheol 인증과 repo/workflow 권한을 확인했고 대상 저장소가 Private임을 확인했다.
+기존 원격은 비어 있었다. 기존 원본 이력을 보존한 master 브랜치를 push하고 추적 설정을 연결했다.
+
+- 릴리스 커밋: `2819fd96ef69adc83ca3fbf5ce0ba2520d3653fc`.
+- 태그: `v1.0.0` (annotated tag, 기존 태그 덮어쓰기 없음).
+- [정식 Release](https://github.com/SoonCheol/music-tag-filler-nas/releases/tag/v1.0.0): 발행 완료, Draft/Prerelease 아님.
+- 최초 브랜치 push의 GitHub Actions 검증 성공. 태그 push 실행은 발행 직후 진행 중이었다.
+- Windows keyring의 GitHub CLI 인증과 Git credential helper, origin/master 추적 연결을 설정했다.
+  토큰을 파일·문서·URL에 기록하지 않았다. 토큰 자체를 출력하거나 commit하지 않는다.
+
+위 GitHub 등록 작업은 반복하지 않는다. 새 이름으로의 NAS 운영 이전은 여전히 Portainer 인증 대기다.
+향후 이전 결과는 별도 커밋/후속 버전으로 기록하며 발행한 v1.0.0 태그를 재지정하지 않는다.
+상단의 인증 대기 설명과 재개 순서 중 GitHub 미등록 부분은 이 완료 기록으로 대체한다.
 
 공식 절차: [Portainer 스택 이름 이전](https://docs.portainer.io/user/docker/stacks/migrate),
 [GitHub 인증](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github).
