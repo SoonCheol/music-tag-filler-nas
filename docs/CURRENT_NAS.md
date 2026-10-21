@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v1.0.0` |
-| 이미지 ID | `sha256:e269cea16f899b9c9ef2b6a3aecfdcf10e49a769d5e788a34d29e3d3e6010e68` |
+| 이미지 ID | `sha256:814278cb46c9676b838daf61d5218eaf8868381dc8db4c821a162f95c5fd29a7` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
