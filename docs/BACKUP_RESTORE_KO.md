@@ -29,7 +29,7 @@
 
 아래는 **나중에 실제 백업을 요청받았을 때 NAS SSH 셸에서 실행할 예시**다.
 백업 경로 `/volume3/backups/music-tag-filler-v6`는 권장 예시이며 현재 존재 여부는 조사하지 않았다.
-백업 작업 중 v6만 잠시 중지하므로 먼저 사용자에게 중단 시간을 알리고 진행한다.
+백업 작업 중 music-tag-filler만 잠시 중지하므로 먼저 사용자에게 중단 시간을 알리고 진행한다.
 권한 오류가 나면 sudo/권한 변경으로 우회하지 않는다.
 
 ```sh
@@ -38,19 +38,19 @@ umask 077
 task_backup_dir="/volume3/backups/music-tag-filler-v6/$(date -u +%Y%m%d-%H%M%S)"
 mkdir -p "$task_backup_dir"
 cd "$task_backup_dir"
-test "$(docker inspect --format '{{.State.Running}}' music-tag-filler-v6)" = true
-trap 'docker start music-tag-filler-v6 >/dev/null' EXIT
-docker stop music-tag-filler-v6
-docker cp music-tag-filler-v6:/data - > data.tar
-docker inspect music-tag-filler-v6 > container-inspect.json
+test "$(docker inspect --format '{{.State.Running}}' music-tag-filler)" = true
+trap 'docker start music-tag-filler >/dev/null' EXIT
+docker stop music-tag-filler
+docker cp music-tag-filler:/data - > data.tar
+docker inspect music-tag-filler > container-inspect.json
 docker cp portainer:/data/compose/32/docker-compose.yml - > portainer-definition.tar
-docker image save -o image.tar music-tag-filler-nas:v6
+docker image save -o image.tar music-tag-filler-nas:v1.0.0
 sha256sum data.tar image.tar container-inspect.json portainer-definition.tar > SHA256SUMS
 sha256sum -c SHA256SUMS
 tar -tf data.tar | head -20
-docker start music-tag-filler-v6 >/dev/null
+docker start music-tag-filler >/dev/null
 trap - EXIT
-test "$(docker inspect --format '{{.State.Running}}' music-tag-filler-v6)" = true
+test "$(docker inspect --format '{{.State.Running}}' music-tag-filler)" = true
 # 실패 시 EXIT trap으로 재시작을 시도하며, 시작 실패는 즉시 수동 확인한다.
 ```
 
@@ -72,7 +72,7 @@ tar 목록이 기대한 `data/` 구조인지 직접 확인한다. Portainer arch
 4. jobs/settings JSON을 파싱할 수 있는지, backups의 manifest/원본 파일들이 모두 있는지 확인한다.
    manifest.sha256은 manifest.json의 SHA256 값이며 일반적인 `sha256sum -c` 목록 형식이 아니다.
    `original.bin` 해시/크기는 manifest와 같아야 한다. 손상 시 저장/복원 차단을 유지한다.
-5. 기존 설치라면 v6를 중지하고 현재 data를 **다른 이름으로 보존한 뒤** 검증한 복원 data로 교체한다.
+5. 기존 설치라면 music-tag-filler를 중지하고 현재 data를 **다른 이름으로 보존한 뒤** 검증한 복원 data로 교체한다.
    새 설치라면 프로그램을 처음 실행하기 전에 프로젝트의 `data/` 위치에 복원한다.
 6. 같은 버전의 이미지를 복원하거나 Git 소스로 새 빌드한다.
    `docker image load -i <image.tar>`는 보관한 이미지/태그를 되살린다.

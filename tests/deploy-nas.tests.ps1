@@ -10,14 +10,14 @@ foreach ($name in @('Read-DeployConfig', 'Get-Value', 'Assert-Same', 'Assert-Sta
     $functionAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-$image = 'music-tag-filler-nas:v6'
-$container = 'music-tag-filler-v6'
+$image = 'music-tag-filler-nas:v1.0.0'
+$container = 'music-tag-filler'
 function New-Fixture {
     $definition = @'
-{"networks":{"default":{"name":"music-tag-filler-v6_default"}},"services":{"music-tag-filler-v6":{"image":"music-tag-filler-nas:v6","container_name":"music-tag-filler-v6","command":null,"entrypoint":null,"environment":{"MUSIC_ROOT":"/music"},"networks":{"default":null},"ports":[{"target":8000,"published":"8000","protocol":"tcp"}],"restart":"unless-stopped","volumes":[{"type":"bind","source":"/library","target":"/music","read_only":true,"bind":{}},{"type":"bind","source":"/state","target":"/data","bind":{}}]}}}
+{"networks":{"default":{"name":"music-tag-filler_default"}},"services":{"music-tag-filler":{"image":"music-tag-filler-nas:v1.0.0","container_name":"music-tag-filler","command":null,"entrypoint":null,"environment":{"MUSIC_ROOT":"/music"},"networks":{"default":null},"ports":[{"target":8000,"published":"8000","protocol":"tcp"}],"restart":"unless-stopped","volumes":[{"type":"bind","source":"/library","target":"/music","read_only":true,"bind":{}},{"type":"bind","source":"/state","target":"/data","bind":{}}]}}}
 '@ | ConvertFrom-Json
     $running = @'
-{"Config":{"Cmd":["uvicorn"],"Entrypoint":null,"User":"","WorkingDir":"/app","Env":["PATH=/usr/bin","MUSIC_ROOT=/music"]},"Mounts":[{"Type":"bind","Source":"/library","Destination":"/music","RW":false,"Propagation":"rprivate"},{"Type":"bind","Source":"/state","Destination":"/data","RW":true,"Propagation":"rprivate"}],"HostConfig":{"PortBindings":{"8000/tcp":[{"HostIp":"","HostPort":"8000"}]},"RestartPolicy":{"Name":"unless-stopped","MaximumRetryCount":0},"NetworkMode":"music-tag-filler-v6_default","Memory":0,"NanoCpus":0,"CpuShares":0,"CpuQuota":0,"MemoryReservation":0,"MemorySwap":0,"Privileged":false,"ReadonlyRootfs":false,"AutoRemove":false,"PublishAllPorts":false},"NetworkSettings":{"Networks":{"music-tag-filler-v6_default":{}}}}
+{"Config":{"Cmd":["uvicorn"],"Entrypoint":null,"User":"","WorkingDir":"/app","Env":["PATH=/usr/bin","MUSIC_ROOT=/music"]},"Mounts":[{"Type":"bind","Source":"/library","Destination":"/music","RW":false,"Propagation":"rprivate"},{"Type":"bind","Source":"/state","Destination":"/data","RW":true,"Propagation":"rprivate"}],"HostConfig":{"PortBindings":{"8000/tcp":[{"HostIp":"","HostPort":"8000"}]},"RestartPolicy":{"Name":"unless-stopped","MaximumRetryCount":0},"NetworkMode":"music-tag-filler_default","Memory":0,"NanoCpus":0,"CpuShares":0,"CpuQuota":0,"MemoryReservation":0,"MemorySwap":0,"Privileged":false,"ReadonlyRootfs":false,"AutoRemove":false,"PublishAllPorts":false},"NetworkSettings":{"Networks":{"music-tag-filler_default":{}}}}
 '@ | ConvertFrom-Json
     # Optional fields omitted by Docker image inspect must be supported.
     $imageConfig = '{"Cmd":["uvicorn"],"WorkingDir":"/app","Env":["PATH=/usr/bin"]}' | ConvertFrom-Json
@@ -29,17 +29,17 @@ function Check-Fixture {
 }
 Check-Fixture (New-Fixture)
 $writable = New-Fixture
-$writable.Definition.services.'music-tag-filler-v6'.volumes[0].read_only = $false
+$writable.Definition.services.'music-tag-filler'.volumes[0].read_only = $false
 $writable.Running.Mounts[0].RW = $true
 Check-Fixture $writable
 $cases = @(
-    @{ Name = 'writable music'; Mutate = { param($f) $f.Definition.services.'music-tag-filler-v6'.volumes[0].read_only = $false } },
-    @{ Name = 'changed environment'; Mutate = { param($f) $f.Definition.services.'music-tag-filler-v6'.environment.MUSIC_ROOT = '/other' } },
-    @{ Name = 'changed port'; Mutate = { param($f) $f.Definition.services.'music-tag-filler-v6'.ports[0].published = '9000' } },
-    @{ Name = 'changed volume'; Mutate = { param($f) $f.Definition.services.'music-tag-filler-v6'.volumes[1].source = '/other' } },
+    @{ Name = 'writable music'; Mutate = { param($f) $f.Definition.services.'music-tag-filler'.volumes[0].read_only = $false } },
+    @{ Name = 'changed environment'; Mutate = { param($f) $f.Definition.services.'music-tag-filler'.environment.MUSIC_ROOT = '/other' } },
+    @{ Name = 'changed port'; Mutate = { param($f) $f.Definition.services.'music-tag-filler'.ports[0].published = '9000' } },
+    @{ Name = 'changed volume'; Mutate = { param($f) $f.Definition.services.'music-tag-filler'.volumes[1].source = '/other' } },
     @{ Name = 'privileged container'; Mutate = { param($f) $f.Running.HostConfig.Privileged = $true } },
     @{ Name = 'new image default'; Mutate = { param($f) $f.ImageConfig.Env = @('PATH=/changed') } },
-    @{ Name = 'unknown Compose option'; Mutate = { param($f) $f.Definition.services.'music-tag-filler-v6' | Add-Member -NotePropertyName 'privileged' -NotePropertyValue $true } }
+    @{ Name = 'unknown Compose option'; Mutate = { param($f) $f.Definition.services.'music-tag-filler' | Add-Member -NotePropertyName 'privileged' -NotePropertyValue $true } }
 )
 foreach ($case in $cases) {
     $fixture = New-Fixture

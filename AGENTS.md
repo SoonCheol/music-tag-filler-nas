@@ -27,11 +27,11 @@ Linux Docker 이미지에서 unittest discover -s tests -p 'test_p*.py'를 실�
 ## NAS 배포와 복구
 
 정식 이름 이전 작업은 docs/V1_REGISTRATION_STATUS.md를 먼저 확인한다.
-최종 고정 스택·컨테이너 이름은 music-tag-filler, 버전 이미지는 music-tag-filler-nas:v1.0.0이며
-인증 대기 중인 실제 운영은 아직 v6다. 이전을 확인하기 전에 완료로 기록하거나 배포 설정을 바꾸지 않는다.
-이전 완료 후에는 고정 이름을 유지하고 이미지 버전 태그만 갱신한다. NAS 호스트 경로는 바꾸지 않는다.
+현재 고정 스택·컨테이너·서비스 이름은 music-tag-filler, 이미지는 music-tag-filler-nas:v1.0.0이다.
+2026-10-21 Portainer 공식 API로 이전 완료했다. 스택 ID 32와 관리자 전용 접근 제어를 보존했다.
+이후에는 고정 이름을 유지하고 이미지 버전 태그만 갱신한다. NAS 호스트 경로는 바꾸지 않는다.
 
-배포 요청 시 테스트 후 기존 deploy-nas.ps1을 사용한다. 기본은 변경 파일 백업/SCP·빌드·v6 단독 재생성이다.
+배포 요청 시 테스트 후 기존 deploy-nas.ps1을 사용한다. 기본은 변경 파일 백업/SCP·빌드·해당 서비스 단독 재생성이다.
 -CheckOnly는 로컬, -PreflightOnly는 NAS 읽기 전용 검사, -BuildOnly는 전송/빌드까지다.
 로컬 JSON의 기존 키와 legacy SCP 방식을 유지한다. Portainer 원본을 저장소 YAML로 덮어쓰지 않는다.
 Docker 환경·포트·볼륨과 승인된 /music:rw를 보존한다. 테스트는 운영 음악을 수정하지 않는다.

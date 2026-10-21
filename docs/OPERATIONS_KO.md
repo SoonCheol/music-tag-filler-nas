@@ -51,7 +51,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1
 ```
 
 실제 배포는 로컬 JSON → 기존 정의/컨테이너 대조 → 변경 파일만 백업·SCP → 이미지 빌드 →
-새 이미지 기본값 대조 → 기존 정의의 스냅샷으로 v6만 재생성 → 설정/마운트/HTTP 확인 순서다.
+새 이미지 기본값 대조 → 기존 정의의 스냅샷으로 music-tag-filler만 재생성 → 설정/마운트/HTTP 확인 순서다.
 Portainer 원본 정의를 수정하지 않는다. `-BuildOnly`는 복사/빌드까지만 수행한다.
 전송 허용 목록은 활성 앱 파일과 Dockerfile·두 requirements·.dockerignore다.
 새 모듈을 추가하면 전송 목록·Docker context·복구 문서·검증 목록도 갱신한다.
@@ -66,7 +66,7 @@ interrupted로 복구되며 사용자가 이어하기를 선택해야 한다. �
 - 빌드 실패: 기존 컨테이너는 보통 기존 이미지로 계속 실행한다. 소스 전송은 이미 끝났을 수 있다.
 - 재생성/HTTP 실패: 자동 롤백은 하지 않는다. 이미지 ID·마운트·환경·로그를 먼저 확인한다.
 - 이전 이미지 tar가 있으면 `docker image load -i <보관파일>`로 기존 태그를 복구할 수 있다.
-  이어서 기존 스택 정의로 v6만 재생성한다. 다른 서비스나 볼륨은 삭제하지 않는다.
+  이어서 기존 스택 정의로 music-tag-filler만 재생성한다. 다른 서비스나 볼륨은 삭제하지 않는다.
 - 코드로 롤백할 때는 별도 작업 폴더에 승인한 태그/커밋을 checkout하여 검증한 뒤 배포한다.
   현재 수정 사항을 `reset --hard`로 지우지 않는다. 옛 버전이 현 data 형식을 지원하는지도 확인한다.
 - `job_store_error`가 있으면 기존 jobs.json을 별도 보존하고 검증된 백업을 복구한다.
@@ -74,7 +74,7 @@ interrupted로 복구되며 사용자가 이어하기를 선택해야 한다. �
 
 ```powershell
 Invoke-RestMethod http://192.168.0.100:8000/api/diagnostics
-ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "docker logs --tail 100 music-tag-filler-v6"
+ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "docker logs --tail 100 music-tag-filler"
 ```
 
 로그와 inspect 파일에는 파일명/환경값이 있을 수 있으므로 GitHub 이슈나 로그 아티팩트에 그대로 올리지 않는다.

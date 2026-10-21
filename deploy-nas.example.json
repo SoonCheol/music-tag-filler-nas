@@ -2,8 +2,8 @@
     "NasTarget":  "nas_user@nas.example.invalid",
     "SshKey":  "%USERPROFILE%\\.ssh\\nas_deploy",
     "RemoteRoot":  "/srv/docker/music-tag-filler-v6",
-    "Image":  "music-tag-filler-nas:v6",
-    "Container":  "music-tag-filler-v6",
+    "Image":  "music-tag-filler-nas:v1.0.0",
+    "Container":  "music-tag-filler",
     "PortainerStackFile":  "/data/compose/STACK_ID/docker-compose.yml",
     "WebBaseUrl":  "http://nas.example.invalid:8000",
     "MusicReadOnly":  false

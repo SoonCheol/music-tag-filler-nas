@@ -1,5 +1,12 @@
 # 변경 기록
 
+## Unreleased — 정식 운영 이름 이전
+
+- Portainer 공식 API로 스택·프로젝트·서비스·컨테이너를 `music-tag-filler`로 이전.
+- 검증된 `music-tag-filler-nas:v1.0.0` 이미지 적용. 기존 음악·data 경로, rw 마운트, 환경·포트 유지.
+- 원본 정의/data 백업, 단일 인스턴스 이전 및 최종 Portainer active·컨테이너 running·웹 HTTP 200 확인.
+- 배포 설정과 설치·복구·AI 인계 문서를 실제 운영 이름으로 정리. 기존 v1.0.0 태그·Release 유지.
+
 ## Unreleased — v1.0.0 정식 등록 작업
 
 - 사용자 요청에 따라 운영 `/music:rw` 전환과 격리 음원 4종의 저장·원본 바이트 복원 검증 완료.

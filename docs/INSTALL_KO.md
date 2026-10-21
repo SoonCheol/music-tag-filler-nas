@@ -45,7 +45,7 @@ ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "d
 
 ## 3. NAS에 최초 소스 설치
 
-이 단계는 **아직 v6 컨테이너가 없는 새 설치 전용**이다. 기존 설치는 업데이트 절차를 사용한다.
+이 단계는 **아직 music-tag-filler 컨테이너가 없는 새 설치 전용**이다. 기존 설치는 업데이트 절차를 사용한다.
 음악 경로가 존재하고 읽을 수 있는지, 8000 포트가 비어 있는지 확인한다.
 없는 음악 경로를 빈 폴더로 만들어 문제를 숨기지 않는다.
 이전 data가 있다면 새로 만들기 전에 별도 복구 절차를 진행한다.
@@ -53,7 +53,7 @@ ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "d
 ```powershell
 ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "mkdir -p /volume3/docker3/music-tag-filler-v6/data"
 scp -O -r -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes app Dockerfile requirements.txt requirements.lock.txt .dockerignore portainer-stack.yml hitmyhead@192.168.0.100:/volume3/docker3/music-tag-filler-v6/
-ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "cd /volume3/docker3/music-tag-filler-v6 && docker build -t music-tag-filler-nas:v6 ."
+ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "cd /volume3/docker3/music-tag-filler-v6 && docker build -t music-tag-filler-nas:v1.0.0 ."
 ```
 
 `scp -O`는 기존에 검증된 legacy SCP 방식이다. 개인키·로컬 JSON·Git 메타데이터·음악은 전송하지 않는다.
@@ -63,7 +63,7 @@ ssh -i C:\Users\homes\.ssh\codex_nas -o BatchMode=yes hitmyhead@192.168.0.100 "c
 
 ## 4. Portainer 스택 생성
 
-1. Portainer의 NAS Docker 환경에서 새 스택 이름을 **`music-tag-filler-v6`**로 지정한다.
+1. Portainer의 NAS Docker 환경에서 새 스택 이름을 **`music-tag-filler`**로 지정한다.
 2. 저장소 루트 `portainer-stack.yml`을 Web editor에 넣는다. 먼저 NAS에서 위 이미지를 빌드해야 한다.
 3. 새 NAS의 음악/data 호스트 경로를 확인한다. 현재 승인된 운영 설정은 음악 `read_only: false`이다. 읽기 전용 운영을 원하면 YAML을 true로 설정하고 로컬 JSON의 MusicReadOnly도 true로 맞춘다.
 4. 스택을 생성하고 컨테이너가 하나만 생성되는지 확인한다. 메모리·권한·환경변수를 임의 추가하지 않는다.
@@ -75,11 +75,11 @@ Portainer를 쓰지 않는 설치에 한해서 다음 CLI 경로도 가능하다
 
 ```sh
 cd /volume3/docker3/music-tag-filler-v6
-docker compose -p music-tag-filler-v6 -f portainer-stack.yml up -d --no-build --pull never
+docker compose -p music-tag-filler -f portainer-stack.yml up -d --no-build --pull never
 ```
 
 기존 Portainer 설치에 저장소 YAML을 다시 적용하는 것은 업데이트 방법이 아니다.
-자동 배포는 기존 실제 정의를 읽고 설정 동일성을 검증하여 v6만 재생성한다.
+자동 배포는 기존 실제 정의를 읽고 설정 동일성을 검증하여 music-tag-filler만 재생성한다.
 
 ## 5. 설치 확인
 

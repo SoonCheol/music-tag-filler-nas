@@ -1,4 +1,4 @@
-﻿# NAS deployment
+# NAS deployment
 
 한글 설치·운영·복구의 시작점은 [README.md](README.md)이며,
 실제 현 NAS 값은 [docs/CURRENT_NAS.md](docs/CURRENT_NAS.md)에 있다.
@@ -23,7 +23,7 @@ Use `-ConfigFile <absolute-path>` for an alternative private JSON file; keep it
 outside Git or name it `*.local.json`. Do not commit local settings with `git add -f`.
 
 ```powershell
-# Full deployment: compare, back up, upload, build, recreate v6, verify
+# Full deployment: compare, back up, upload, build, recreate music-tag-filler, verify
 powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-nas.ps1
 
 # Upload/build only; leave the running container unchanged
@@ -57,8 +57,8 @@ New image defaults are also checked before recreation.
 
 A private definition snapshot is saved under the project's `deploy-backups/`.
 Compose uses the existing project/service name and
-`up -d --no-deps --no-build --pull never --force-recreate music-tag-filler-v6`.
-Only v6 is recreated. No stack removal, volume deletion, or other-service restart
+`up -d --no-deps --no-build --pull never --force-recreate music-tag-filler`.
+Only music-tag-filler is recreated. No stack removal, volume deletion, or other-service restart
 occurs. The repository's writable-music Compose definition is never used.
 
 ## Files, checks, and failures
@@ -80,7 +80,7 @@ Recreation or health-check failures need inspection; no automatic rollback occur
 If credentials or Docker permissions are insufficient, report the requirement
 instead of changing privileges. Avoid concurrent manual Portainer redeployments.
 
-NAS read-only preflight, Compose dry-run, actual v6 recreation, and final HTTP/API
+NAS read-only preflight, Compose dry-run, actual service recreation, and final HTTP/API
 health checks have passed. The P0 deployment and isolated generated-audio storage
 tests are recorded in `P0_VALIDATION.md`.
 

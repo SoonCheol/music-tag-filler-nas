@@ -1,9 +1,9 @@
 # CLI equivalent of portainer-stack.yml; do not run alongside a Portainer stack.
-# docker compose -p music-tag-filler-v6 up -d --no-build --pull never
+# docker compose -p music-tag-filler up -d --no-build --pull never
 services:
-  music-tag-filler-v6:
-    image: music-tag-filler-nas:v6
-    container_name: music-tag-filler-v6
+  music-tag-filler:
+    image: music-tag-filler-nas:v1.0.0
+    container_name: music-tag-filler
     ports:
       - "8000:8000"
     volumes:

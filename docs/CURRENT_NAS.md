@@ -1,87 +1,68 @@
 # 현재 NAS 구성 — 비공개 저장소용 운영 기록
 
-2026-10-21에 실제 NAS를 읽기 전용 조사했다. 사용자의 이번 지시에 따라
-주소·계정·경로는 정확히 기록한다. 이 문서는 Git 업로드 대상이므로 저장소를
-비공개로 유지한다. 비밀번호·개인키 내용·실제 API 키는 기록하지 않는다.
+2026-10-21 Portainer 공식 API로 정식 운영 이름 이전을 완료하고 실제 상태를 확인했다.
+운영 메타데이터는 사용자 요청으로 보관한다. 저장소는 Private로 유지하며 비밀번호·토큰·개인키 내용은 기록하지 않는다.
 
 | 항목 | 확인한 값 |
 | --- | --- |
-| GitHub 백업 대상 | `https://github.com/SoonCheol/music-tag-filler-nas` |
-| Windows 작업 폴더 | `C:\Codex\music-tag-filler-nas` |
+| GitHub | https://github.com/SoonCheol/music-tag-filler-nas (Private) |
+| Windows 프로젝트 | `C:\Codex\music-tag-filler-nas` |
 | NAS / SSH | `hitmyhead@192.168.0.100` |
-| 기존 SSH 개인키 위치 | `C:\Users\homes\.ssh\codex_nas` (파일 자체는 Git 보관 금지) |
-| NAS 프로젝트 | `/volume3/docker3/music-tag-filler-v6` |
-| 음악 원본 | `/volume1/Multimedia/Music` → `/music:rw` |
-| 프로그램 데이터 | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
-| 이미지 | `music-tag-filler-nas:v6` |
-| 컨테이너·Compose 프로젝트·서비스 | 모두 `music-tag-filler-v6` |
-| 웹 | `http://192.168.0.100:8000/` |
-| 포트 | 호스트 `8000` → 컨테이너 `8000/tcp` |
-| Portainer 컨테이너 | `portainer` |
-| 현재 Portainer 정의 위치 | 컨테이너 내부 `/data/compose/32/docker-compose.yml` |
-| 기본 네트워크 | `music-tag-filler-v6_default` |
-| 재시작 정책 | `unless-stopped` |
-| Docker / Compose | `29.6.2` / `v5.1.3` |
-| NAS CPU | `x86_64` (ARM 이식은 별도 검증 필요) |
-| 컨테이너 작업 디렉터리 | `/app` |
-| 실행 사용자 | 이미지 기본 사용자 (현재 명시적 `user` 없음) |
-| 사용자 환경변수 | `MUSIC_ROOT=/music`, `DATA_ROOT=/data`, `TZ=Asia/Seoul` |
-| 제한/권한 | 별도 CPU·메모리 제한 없음, privileged 아님, rootfs 읽기 전용 아님 |
-| 서버 실행 | `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1` |
-| 실행 중 이미지 ID | `sha256:467fd3b7a2c2f254aff3f2b316ae4eda46e9dc725683a377e2408863d6f00ca0` |
+| SSH 개인키 위치 | `C:\Users\homes\.ssh\codex_nas` (파일 업로드 금지) |
+| NAS 프로젝트 | `/volume3/docker3/music-tag-filler-v6` (기존 경로 유지) |
+| 음악 | `/volume1/Multimedia/Music` → `/music:rw` |
+| 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
+| 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
+| 이미지 | `music-tag-filler-nas:v1.0.0` |
+| 이미지 ID | `sha256:148df465bfc0ecbfa3020834d479772e02d08ad8f6ce8877e0a45f79f1ded93b` |
+| 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
+| Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
+| 스택 ID / 환경 ID | `32` / `7` |
+| 원본 정의 | Portainer 내부 `/data/compose/32/docker-compose.yml` |
+| 접근 제어 | ID 44, AdministratorsOnly=true 보존 |
+| 기본 네트워크 | `music-tag-filler_default` |
+| 환경변수 | `MUSIC_ROOT=/music`, `DATA_ROOT=/data`, `TZ=Asia/Seoul` |
+| 재시작 | `unless-stopped` |
+| Docker / Compose / CPU | `29.6.2` / `v5.1.3` / `x86_64` |
+| 작업 디렉터리·실행 사용자 | `/app`, 이미지 기본 사용자 |
+| 명령 | `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1` |
+| 리소스·권한 | 별도 CPU/메모리 제한 없음, privileged=false, ReadonlyRootfs=false |
+| 최종 상태 | Portainer active, 컨테이너 running·재시작 0, 웹 HTTP 200 |
 
-조사 시 `data/` 최상위에는 `jobs.json`, `backups/`가 있었다.
-`settings.json`, `acoustid_key.txt`는 없었다. 설정 파일이 없으면 코드 기본값을 사용한다.
-AcoustID 키 미설정, fpcalc 사용 가능이라는 기존 진단 결과와 일치한다.
-설정/API 키의 **내용**이나 음악 파일은 이번 조사에서 읽지 않았다.
+## 로컬 배포 설정
 
-## 로컬 배포 설정 복원
-
-실제 값은 Git에서 제외되는 `deploy-nas.local.json`에 보관한다.
-PC 교체 시 `deploy-nas.example.json`을 복사하고 아래 비밀값 없는 정보를 입력한다.
-SSH 키 파일은 별도 안전한 백업에서 가져오거나 새 키를 등록한다.
+Git에서 제외하는 `deploy-nas.local.json`의 현재 값이다. 새 PC에서는 예시 JSON을 복사하고 채운다.
+Portainer 스택 ID는 새 NAS에서 달라질 수 있으므로 실제 경로를 확인한다.
 
 ```json
 {
   "NasTarget": "hitmyhead@192.168.0.100",
   "SshKey": "C:\\Users\\homes\\.ssh\\codex_nas",
   "RemoteRoot": "/volume3/docker3/music-tag-filler-v6",
-  "Image": "music-tag-filler-nas:v6",
-  "Container": "music-tag-filler-v6",
+  "Image": "music-tag-filler-nas:v1.0.0",
+  "Container": "music-tag-filler",
   "PortainerStackFile": "/data/compose/32/docker-compose.yml",
   "WebBaseUrl": "http://192.168.0.100:8000",
   "MusicReadOnly": false
 }
 ```
 
-새 PC 사용자명이 다르면 `SshKey`만 새 절대 경로로 바꾼다. 새 NAS로 이사하면
-주소·계정·프로젝트/음악/data 경로와 두 YAML을 새 환경에 맞춘다.
-Portainer 스택 ID `32`는 영구 식별자가 아니다. 새 스택을 만든 뒤 실제 정의 위치를
-Portainer에서 확인하여 로컬 JSON에 반영한다. 추측한 ID로 기존 스택을 덮어쓰지 않는다.
+고정 운영 이름은 이후에도 유지하고 새 버전은 이미지 태그만 변경한다.
+버전 전환 시 현재 Portainer 정의의 다른 값을 보존하면서 이미지 태그와 로컬 JSON을 함께 맞춘다.
+배포 스크립트는 기존 이미지·정의·마운트 모드 불일치를 자동 우회하지 않는다.
 
-## 현재 기록과 소스의 차이
+## 인증·백업·보존
 
-위 이미지 ID는 이미 배포된 UI 수정 버전이다. 이번 장기 보관 준비에서 만든
-의존성 잠금·문서·YAML·CI·배포 허용 목록 변경은 아직 운영 NAS에 배포하지 않았다.
-컨테이너 이미지와 현재 작업 트리의 Git 커밋이 같다고 가정하지 않는다.
-현재 GitHub push도 아직 수행하지 않았다.
+사용자가 지정한 Portainer 토큰은 외부 파일 `C:\Users\homes\.codex\portainer-token.txt`에서
+메모리로 읽어 `X-API-Key`에만 사용했다. 토큰 내용은 저장소·로그·명령 인자에 넣지 않는다.
+일상 배포는 기존 SSH/SCP 방식이며 이 토큰을 배포 JSON에 복사할 필요가 없다.
 
-사용 한도 중단 후 마지막 SSH 재확인에서는 22번 포트 연결이 거부되었다.
-위 표는 앞서 성공한 읽기 전용 조사의 스냅샷이며, 재개 시점의 가동 상태를
-새로 확인한 기록은 아니다. 접속 복구 전에는 이를 근거로 자동 변경을 수행하지 않는다.
+NAS 프로젝트의 `deploy-backups/name-migration-20261021/`에 원본 Portainer 정의와
+컨테이너 inspect, data tar, 변경 전후 컨테이너 목록, 원본/대상 YAML을 보존했다.
+전후 data가 일치하며 음악 파일을 수정하지 않았다. 다른 컨테이너 ID도 그대로다.
+기본 네트워크 이름은 새 Compose 프로젝트에 맞춰 변경됐다.
 
-### 이후 재확인: 2026-10-21 13:19 KST
-
-기존 키로 SSH 연결이 다시 정상화되었고 운영 컨테이너 running·재시작 횟수 0,
-동일 이미지 ID·마운트·환경·포트를 확인했다. 웹 HTTP 200과 운영/로컬 HTML 일치,
-활성 앱 파일 17개 SHA256 일치, diagnostics 오류 없음, 폴더 3517개도 확인했다.
-키는 여전히 미설정이며 fpcalc는 사용 가능하다. 앞선 연결 거부는 과거 점검 결과다.
-컨테이너/음악/설정은 변경하지 않았다. [v1.0.0 준비 기록](RELEASE_V1_0_0.md)을 참고한다.
-
-## 음악 쓰기 모드 변경 — 2026-10-21
-
-사용자 요청 및 격리된 NAS 음원 검증 후 현재 운영 음악 마운트는 `/music:rw`이다.
-로컬 배포 설정의 `MusicReadOnly`는 JSON boolean `false`로 맞춘다. 문자열은 허용하지 않는다.
-항목이 없는 이전 설정은 true로 처리되며 실제 모드가 다르면 배포를 중단한다.
-배포는 마운트 모드를 자동 변경하지 않고 현재 승인된 설정만 보존한다.
-기존 문서의 ro 설명은 전환 이전 기록이며 [전환 검증](RW_MOUNT_VALIDATION.md)을 따른다.
+새 이미지의 기존 회귀 55개 및 격리된 음원 4종 저장·원본 바이트 복원 검증은
+[등록 기록](V1_REGISTRATION_STATUS.md)을 따른다. 이번 이름 이전에서는 이 시험들을 반복하지 않았다.
+AcoustID 키 미설정과 기존 보안 공지 제한은 [보안 보고서](SECURITY_AUDIT_KO.md)에 남아 있다.
+원본 음악·data·API 키·SSH 개인키는 GitHub만으로 복구할 수 없으며 별도 백업이 필요하다.

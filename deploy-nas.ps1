@@ -106,7 +106,7 @@ function Assert-Same {
 function Assert-StackMatches {
     param($Definition, $Running, $ImageConfig)
     $service = Get-Value $Definition.services $container
-    if ($null -eq $service) { throw 'Existing v6 service is absent from the stack definition.' }
+    if ($null -eq $service) { throw 'Existing service is absent from the stack definition.' }
     # Fail closed when a new setting needs explicit preservation support.
     $supported = @('command','container_name','entrypoint','environment','image','networks','ports','restart','volumes')
     foreach ($name in $service.PSObject.Properties.Name) {
@@ -267,7 +267,7 @@ try {
         } catch { Write-Verbose $_.Exception.Message }
         Start-Sleep -Seconds 2
     }
-    if (!$healthy) { throw 'Web verification failed. Inspect the v6 container; no automatic rollback attempted.' }
+    if (!$healthy) { throw 'Web verification failed. Inspect the service container; no automatic rollback attempted.' }
     Write-Host 'Deployment complete: expected image, unchanged mounts/settings, HTTP and folder API verified.'
 } catch {
     Write-Error "Deployment stopped: $($_.Exception.Message) Earlier completed steps are not automatically undone."

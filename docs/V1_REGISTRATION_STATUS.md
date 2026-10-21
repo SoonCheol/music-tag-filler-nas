@@ -1,5 +1,24 @@
 # v1.0.0 등록 진행 상태
 
+## NAS 운영 이름 이전 완료 — 2026-10-21
+
+Portainer 공식 stop·update·migrate API로 스택 ID 32를 `music-tag-filler`로 이전했다.
+컨테이너·Compose 서비스·프로젝트는 모두 `music-tag-filler`, 이미지는 `music-tag-filler-nas:v1.0.0`이다.
+기존 관리자 전용 접근 제어(ID 44), NAS 프로젝트/data 경로, `/music:rw`, `/data:rw`,
+환경·포트 8000·기타 호스트 설정과 다른 컨테이너를 보존했다. 기본 네트워크 이름만 새 프로젝트에
+맞춰 `music-tag-filler_default`가 됐다. 이전/새 인스턴스를 동시에 실행하지 않았다.
+
+NAS 프로젝트의 `deploy-backups/name-migration-20261021/`에 원본 정의·컨테이너 설정과 data를 백업했다.
+전후 data tar 비교가 일치했고 최종 컨테이너 running·재시작 0, Portainer active, 웹 HTTP 200이다.
+기존 음악 파일은 수정하지 않았다. 이미 통과한 전체 테스트와 음원 저장 시험은 반복하지 않았다.
+
+공식 migrate 호출 직후 컨테이너는 실행됐으나 Portainer의 inactive 표시가 남았다.
+start 요청은 실패했으며, 동일 정의를 공식 update API로 적용해 active 상태로 정상화했다.
+직접 DB 수정·원본 스택 삭제·토큰 출력은 하지 않았다.
+
+아래 인증 대기와 현재/목표 비교는 이전 전의 역사적 기록이다. 현재 운영은
+[현재 NAS](CURRENT_NAS.md)를 따른다. GitHub v1.0.0 태그·Release는 수정하지 않는다.
+
 2026-10-21 사용자가 운영 이름 이전·commit·비공개 GitHub push·태그·Release 등록을 요청했다.
 이 문서는 완료되지 않은 작업을 완료로 오인하지 않기 위한 재개 지점이다.
 

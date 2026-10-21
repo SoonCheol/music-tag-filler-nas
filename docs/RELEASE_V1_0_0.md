@@ -4,7 +4,9 @@
 `2819fd96ef69adc83ca3fbf5ce0ba2520d3653fc`를 push하고 `v1.0.0` 태그와
 [정식 Release](https://github.com/SoonCheol/music-tag-filler-nas/releases/tag/v1.0.0)를 등록했다.
 아래 내용은 준비 당시의 초안/점검 기록이며, 최신 상태는 [등록 상태](V1_REGISTRATION_STATUS.md)를 따른다.
-NAS 이름 이전은 Portainer 인증 대기 중이며 Release 본문에도 이 제한을 명시했다.
+Release 발행 당시 NAS 이름 이전은 인증 대기였으며 본문에 그 제한을 명시했다.
+이후 공식 Portainer API로 운영 이전을 완료했다. 최신 운영 상태는 [현재 NAS](CURRENT_NAS.md)를
+따르며 발행한 v1.0.0 태그와 Release 본문은 소급 변경하지 않는다.
 
 **최신 지시:** 사용자가 정식 운영 이름 `music-tag-filler`와 이미지 `music-tag-filler-nas:v1.0.0`으로
 이전 및 등록을 요청했다. 아래 v6/ro 점검표는 과거 기록이다. 현재 rw와 새 이미지 검증,

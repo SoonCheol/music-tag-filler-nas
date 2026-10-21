@@ -1,4 +1,4 @@
-# Music Tag Filler NAS v6
+# Music Tag Filler NAS v1.0.0
 
 음악 검색·후보 적용·태그/커버/가사 처리와 무결성 백업을 제공하는 NAS 웹 앱입니다.
 이 비공개 저장소는 소스·설치 방법·운영 기록을 보관합니다.
