@@ -195,7 +195,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   thumbnail.onmouseleave();assert.equal(hoverOnly.$('hoverPrev').style.display,'none');
   assert.ok(html.includes('#fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}'));
   assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:calc(480px / 13)}'));
-  assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><input id="chg_album"/);
+  assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><div>앨범 :<\/div><input id="chg_album"/);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
   pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});
   pathTip.run("pendingFolder='DANCE/Fitness Latino Path Full';folderLabel()");pathTip.$('folderToggle').listeners.mouseenter();

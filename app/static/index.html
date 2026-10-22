@@ -22,8 +22,8 @@ body{margin:0;background:var(--bg);font-family:"Malgun Gothic","Apple SD Gothic 
 .btn-red{background:#fff0f0;color:#c00;border-color:#f0c0c0}
 .btn-green{background:#f0faf0;color:#0a6;border-color:#b0e0b0}
 .btn:disabled{opacity:.5}
-.main{max-width:1400px;margin:0 auto;padding:10px;display:grid;grid-template-columns:minmax(520px,46%) minmax(520px,1fr);gap:10px;align-items:start}
-@media(max-width:1099px){.main{grid-template-columns:1fr}}
+.main{min-width:1500px;max-width:1720px;margin:0 auto;padding:10px;display:grid;grid-template-columns:minmax(635px,38%) minmax(835px,1fr);gap:10px;align-items:start}
+
 .panel{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .panel-head{padding:7px 10px;background:#f6f7f8;border-bottom:1px solid var(--line);font-weight:700;font-size:12px;display:flex;justify-content:space-between;align-items:center}
 .table-wrap{overflow:auto;max-height:560px}
@@ -43,7 +43,7 @@ tr.selected{background:var(--blue-light) !important}
 .tag-box{padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .tag-section{border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:10px}
 .tag-section h4{margin:0 0 8px 0;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
-.tag-grid{display:grid;grid-template-columns:90px 24px minmax(0,1fr);gap:6px 8px;align-items:center}
+.tag-grid{display:grid;grid-template-columns:14px 90px minmax(0,1fr);gap:6px 5px;align-items:center}
 .tag-grid.no-check{grid-template-columns:90px 1fr}
 .cover{width:110px;height:110px;border:1px solid var(--line);background:#f8f8f8;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:11px;overflow:hidden}
 .cover img{width:100%;height:100%;object-fit:cover}
@@ -78,7 +78,7 @@ tr.selected{background:var(--blue-light) !important}
 #saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;margin:0;z-index:2;accent-color:var(--blue);box-shadow:0 0 0 2px #fff;border-radius:2px;cursor:pointer}
 #fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}
 #fileColumn thead tr{height:37px}#fileBody tr{height:calc(480px / 13)}
-.tag-grid:not(.no-check)>label{display:flex;align-items:center;justify-content:flex-end}
+.tag-grid:not(.no-check)>label{display:flex;align-items:center;justify-content:flex-start}
 .chg-check{margin:0;width:14px;height:14px}
 .job-title{min-width:0;overflow-wrap:anywhere}.job .badge{flex-shrink:0}
 .file-name-cell{padding-top:3px;padding-bottom:3px}
@@ -91,16 +91,16 @@ tr.selected{background:var(--blue-light) !important}
 #fileColumn table{table-layout:fixed}#fileColumn td{max-width:none}
 .file-cover,.file-lyrics{width:24px;height:24px;flex:0 0 24px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px;overflow:hidden}
 .file-cover{position:relative;background:#ddd;color:#777}.file-cover img{position:absolute;inset:0;width:24px;height:24px;object-fit:cover}
-.file-lyrics{background:#999;color:#fff;font-size:13px;font-weight:700}.file-lyrics.has-lyrics{background:#111}
+.file-lyrics{background:#f2f3f5;color:#c5c9cf;border:0;font-size:13px;font-weight:700}.file-lyrics.has-lyrics{background:#111;color:#fff}
 #fileBody .file-empty:hover{background:transparent}#fileBody .file-empty td{padding:0}
-.tag-details{display:grid;grid-template-columns:110px minmax(130px,1fr) minmax(150px,.9fr);gap:12px;align-items:start}
+.tag-details{display:grid;grid-template-columns:110px minmax(350px,1fr) 228px;gap:12px;align-items:start}
 .tag-fields{height:210px;min-width:0;grid-template-rows:repeat(7,minmax(0,1fr))}.tag-fields .input{min-width:0;width:100%}.tag-fields>div[id^="cur_"]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.tag-grid.no-check{grid-template-columns:90px minmax(0,1fr)}
+.tag-grid.no-check{grid-template-columns:109px minmax(0,1fr)}
 .lyrics-box{height:210px;min-width:0;border:1px solid var(--line);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;background:var(--card)}
 .lyrics-box-head{height:30px;flex:0 0 30px;padding:3px 6px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line2);font-size:11px}.lyrics-box-head .btn{margin-left:auto;padding:2px 5px;font-size:11px}.lyrics-check{width:14px;height:14px;margin:0;accent-color:var(--blue)}
 .lyrics-body{flex:1;min-height:0;overflow-y:auto;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.lyrics-empty{display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center}.lyrics-preview{color:#c62828}
 .file-lyrics+.file-name-text{margin-left:6px}
-@media(max-width:600px){.tag-details{grid-template-columns:110px minmax(0,1fr)}.lyrics-box{grid-column:1/-1}}
+
 </style>
 </head>
 <body>
@@ -174,13 +174,13 @@ tr.selected{background:var(--blue-light) !important}
               <div style="display:flex;gap:2px;margin-top:4px"><button class="btn" style="padding:3px;font-size:11px" onclick="$('coverFile').click()">이미지 선택</button><button class="btn" style="padding:3px;font-size:11px" onclick="applyCoverToAll()">전체 적용</button></div>
             </div>
             <div class="tag-grid tag-fields">
-              <div>제목 :</div><label><input type="checkbox" class="chg-check" data-field="title" checked></label><input id="chg_title" class="input" style="padding:3px 6px">
-              <div>가수 :</div><label><input type="checkbox" class="chg-check" data-field="artist" checked></label><input id="chg_artist" class="input" style="padding:3px 6px">
-              <div>앨범 :</div><label><input type="checkbox" class="chg-check" data-field="album" checked></label><input id="chg_album" class="input" style="padding:3px 6px">
-              <div>앨범 가수 :</div><label><input type="checkbox" class="chg-check" data-field="albumartist" checked></label><input id="chg_albumartist" class="input" style="padding:3px 6px">
-              <div>트랙 :</div><label><input type="checkbox" class="chg-check" data-field="track" checked></label><input id="chg_track" class="input" style="padding:3px 6px">
-              <div>년도 :</div><label><input type="checkbox" class="chg-check" data-field="year" checked></label><input id="chg_year" class="input" style="padding:3px 6px">
-              <div>장르 :</div><label><input type="checkbox" class="chg-check" data-field="genre" checked></label><input id="chg_genre" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="title" checked></label><div>제목 :</div><input id="chg_title" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="artist" checked></label><div>가수 :</div><input id="chg_artist" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="album" checked></label><div>앨범 :</div><input id="chg_album" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="albumartist" checked></label><div>앨범 가수 :</div><input id="chg_albumartist" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="track" checked></label><div>트랙 :</div><input id="chg_track" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="year" checked></label><div>년도 :</div><input id="chg_year" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" class="chg-check" data-field="genre" checked></label><div>장르 :</div><input id="chg_genre" class="input" style="padding:3px 6px">
             </div>
             <section class="lyrics-box" aria-label="검색된 가사"><div class="lyrics-box-head"><input type="checkbox" id="saveLyrics" class="lyrics-check" checked aria-label="가사 저장" title="체크된 유효한 새 가사만 저장합니다. 빈 결과는 기존 가사를 유지합니다."><span>가사</span><button type="button" id="btnSearchLyrics" class="btn" onclick="searchLyricsForCurrent()">가사 검색</button></div><div id="changeLyrics" class="lyrics-body lyrics-empty" role="status" aria-live="polite" aria-label="검색 가사 내용">검색 안 함</div></section>
           </div>
@@ -191,7 +191,7 @@ tr.selected{background:var(--blue-light) !important}
             <button id="btnApplyCandidate" class="btn btn-blue" onclick="toggleTagPreview()">미리보기</button>
             <button id="btnSaveCurrent" class="btn" onclick="saveCurrent()">현재 곡 저장</button>
             <button id="btnSaveSelected" class="btn" onclick="saveSelected()">선택 곡 저장 (0곡)</button>
-            <button id="btnSaveAll" class="btn" onclick="saveAll()">작업 전체 저장 (체크 0곡)</button>
+            <button hidden id="btnSaveAll" class="btn" onclick="saveAll()">작업 전체 저장 (체크 0곡)</button>
             <button id="btnDiscard" class="btn" onclick="discardDraft()">편집 취소</button>
             <button id="btnRestore" class="btn" onclick="resetChange()">최초 원본 복원</button>
             <button id="btnOptions" class="btn" onclick="openSaveOptions()" disabled>저장 옵션</button>
