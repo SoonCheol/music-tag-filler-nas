@@ -192,7 +192,9 @@ def ensure_backup(path, root, backup_root, expected):
 
 
 def prepare_cover_change(data, current, max_px=1000):
-    """Keep an identical embedded image unless the requested size requires resizing."""
+    """Empty means keep; only a validated new image can replace embedded bytes."""
+    if data is None or data == b"" or data == "":
+        return None
     if data == current:
         import io
         from PIL import Image

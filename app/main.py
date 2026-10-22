@@ -578,8 +578,8 @@ def save_one(result, item, request, lyric_context=None):
             cover = uploaded
         else:
             cover, asset_errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country)
-        if cover:
-            cover = storage.prepare_cover_change(cover, current.cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
+        # Normalize missing/empty downloads before reaching the transactional writer.
+        cover = storage.prepare_cover_change(cover, current.cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
     lyrics = None
     lyrics_status = "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:

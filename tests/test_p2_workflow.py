@@ -492,6 +492,73 @@ class P2Tests(unittest.TestCase):
                         if only_empty and not blank:self.assertEqual(before,after)
                         else:self.assertTrue(after[0]);self.assertNotEqual(before,after)
 
+    def test_empty_cover_payload_never_removes_embedded_image(self):
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            for empty in (None, b'', ''):
+                with self.subTest(ext=ext, empty=empty):
+                    path = self.copy('empty-' + str(type(empty).__name__) + '.' + ext)
+                    before = p0.tags.read_cover(str(path))
+                    # Exercise the lowest writer too: no empty APIC/PICTURE/covr.
+                    info = p0.tags.read_file(str(path))
+                    p0.tags.write_file(str(path), info.tags, empty, fields=set())
+                    self.assertEqual(p0.tags.read_cover(str(path)), before)
+                    result = storage.save(path, self.root, self.backups, {'title': 'Edited'}, ['title'],
+                                          False, storage.revision(path), cover=empty)
+                    self.assertEqual(result['status'], 'saved')
+                    self.assertEqual(p0.tags.read_cover(str(path)), before)
+
+    def test_invalid_new_cover_is_rejected_before_existing_bytes_change(self):
+        from PIL import UnidentifiedImageError
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            path = self.copy('invalid-cover.' + ext)
+            before = path.read_bytes(), path.stat().st_mtime_ns
+            info = p0.tags.read_file(str(path))
+            with self.assertRaises(UnidentifiedImageError):
+                p0.tags.write_file(str(path), info.tags, b'not an image')
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+            with self.assertRaises(UnidentifiedImageError):
+                storage.save(path, self.root, self.backups, {'title': 'Edited'}, ['title'],
+                             False, storage.revision(path), cover=b'not an image')
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+
+    def test_cover_save_matrix_four_formats_and_all_scopes(self):
+        cases = ((True, None, True, False), (True, None, False, False),
+                 (True, 'new', True, False), (True, 'new', False, False),
+                 (True, 'new', True, True), (False, 'new', True, False))
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            for scope in ('current', 'selected', 'all'):
+                for index, (existing, source, checked, only_empty) in enumerate(cases):
+                    with self.subTest(ext=ext, scope=scope, case=index + 1):
+                        paths = [self.copy(f'{scope}-{index}-{i}.{ext}', blank=not existing)
+                                 for i in range(1 if scope == 'current' else 2)]
+                        before = [p0.tags.read_cover(str(path)) for path in paths]
+                        rows = self.job(paths)
+                        items = [self.item(row, selection="manual", candidate_id=main.candidate_id(row["candidates"][0]), include_cover=source is not None) for row in rows]
+                        new = p0.image_bytes('blue')
+                        with patch.object(search_service, 'fetch_cover', return_value=(new, [])):
+                            result = self.http(self.request(items, scope=scope, save_cover=checked,
+                                                            only_empty=only_empty))
+                        self.assertEqual(result['failed'], 0)
+                        self.assertEqual(result['partial'], 0)
+                        replace = source is not None and checked and not (only_empty and existing)
+                        for path, old in zip(paths, before):
+                            after = p0.tags.read_cover(str(path))
+                            self.assertEqual(after[0], new if replace else old[0])
+                        tasks = list(main.save_tasks.values())
+                        self.assertEqual(tasks[-1]['status'], 'done')
+
+    def test_blank_candidate_response_preserves_cover_and_saves_text(self):
+        for empty in (None, b'', ''):
+            path = self.copy('blank-' + str(type(empty).__name__) + '.mp3')
+            before = p0.tags.read_cover(str(path))
+            row = self.job([path])[0]
+            item = self.item(row, selection="manual", candidate_id=main.candidate_id(row["candidates"][0]), include_cover=True)
+            with patch.object(search_service, 'fetch_cover', return_value=(empty, [])):
+                result = self.http(self.request([item]))
+            self.assertEqual(result['failed'], 0)
+            self.assertEqual(result['saved'], 1)
+            self.assertEqual(p0.tags.read_cover(str(path)), before)
+
     def test_audio_stream_ranges_head_and_read_only(self):
         def stream(path,range_value=None,method='GET'):
             request=urllib.request.Request('http://127.0.0.1:'+str(self.port)+'/api/audio/'+urllib.parse.quote(path,safe=''),method=method,headers={'Range':range_value} if range_value else {})

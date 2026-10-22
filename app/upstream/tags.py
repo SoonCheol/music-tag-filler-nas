@@ -493,6 +493,13 @@ def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: st
     (kept as they are when None); replace_ids makes the file hold exactly `ids`.
     `fields`: None writes all text fields; a set updates only those named fields.
     `lyrics`: None keeps the file's lyrics, "" removes them, text replaces them."""
+    # No delete semantics: missing/empty data always preserves all embedded pictures.
+    if cover is None or cover == b"" or cover == "":
+        cover = None
+    else:
+        from PIL import Image
+        with Image.open(io.BytesIO(cover)) as image:
+            image.verify()
     fmt, audio = _open(path)
     try:
         if fmt == "MP3":

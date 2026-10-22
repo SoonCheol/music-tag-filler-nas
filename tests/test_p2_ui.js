@@ -67,6 +67,22 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(html.includes('NAS v2.0.0'));
   assert.equal(playback.$('headerAudio').textContent,'▶');
 
+  const emptyCover=harness();
+  emptyCover.context.coverJob={id:'cover-empty',results:[{path:'cover.mp3',file_state:'auto',original:{has_cover:true,revision:'a'.repeat(64)},candidates:[{id:'no-image',title:'Song'}],selected_id:'no-image'}]};
+  emptyCover.run('adoptJob(coverJob)');
+  emptyCover.run("editingResult._candidateId='no-image';editingResult._selection='manual'");
+  assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),false);
+  emptyCover.run("editingResult.candidates[0].album='Album'");
+  assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),true);
+  emptyCover.run("candidateCoverCache.set(candidateCoverUrl(editingResult.candidates[0],editingResult),{status:'failed'})");
+  assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),false);
+  assert.equal(emptyCover.run('plannedChanges(editingResult).cover'),false);
+  emptyCover.run("editingResult._coverId='valid-upload'");
+  assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),true);
+  emptyCover.$('saveCover').checked=false;
+  assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),false);
+  assert.equal(emptyCover.run('saveItem(editingResult).cover_id'),null);
+
   const hover=harness(),hoverImages=[];
   const create=hover.context.document.createElement;
   hover.context.document.createElement=tag=>{const node=create(tag);if(tag==='img')hoverImages.push(node);return node;};
