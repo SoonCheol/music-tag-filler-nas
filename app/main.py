@@ -13,6 +13,7 @@ from functools import wraps
 from collections import OrderedDict
 from concurrent.futures import Future
 import io
+import inspect
 from . import storage, search_service, job_service, preferences, rename_service
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
@@ -170,22 +171,45 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             except OSError:
                 job["state_error"] = "작업 기록 실패. 기존 디스크 기록은 보존했습니다"
 
+_activity_lock = threading.RLock()
+_activity = {}
+
+
+def begin_activity(label, path=""):
+    token = uuid.uuid4().hex
+    with _activity_lock:
+        _activity[token] = {"id": token, "label": label, "path": path, "state": "running"}
+        rename_service.active[label] = rename_service.active.get(label, 0) + 1
+    return token
+
+
+def end_activity(token):
+    with _activity_lock:
+        entry = _activity.pop(token, None)
+        if entry:
+            label = entry["label"]
+            rename_service.active[label] = max(0, rename_service.active.get(label, 0) - 1)
+
+
 def path_operation(label):
-    """Register before releasing the mutation lock, including queued save calls."""
+    """Register under the mutation lock; status reads/cleanup use a separate lock."""
     def decorate(function):
+        signature = inspect.signature(function)
         @wraps(function)
         def wrapped(*args, **kwargs):
+            bound = signature.bind(*args, **kwargs).arguments
+            request = bound.get("request")
+            path = bound.get("path") or getattr(request, "path", "")
             with storage.OPERATION_LOCK:
                 try:
                     rename_service.check_ready(DATA_ROOT)
                 except storage.StorageError as exc:
                     raise HTTPException(409, str(exc))
-                rename_service.active[label] = rename_service.active.get(label, 0) + 1
+                token = begin_activity(label, path)
             try:
                 return function(*args, **kwargs)
             finally:
-                with storage.OPERATION_LOCK:
-                    rename_service.active[label] -= 1
+                end_activity(token)
         return wrapped
     return decorate
 
@@ -602,7 +626,7 @@ def research_file(job_id: str, request: SearchRequest):
 
 
 @app.get("/api/jobs/{job_id}/cover/{selection_id}")
-@path_operation("후보 커버 조회")
+@path_operation("앨범 이미지 검색")
 def candidate_cover(job_id: str, selection_id: str, path: str):
     if job_id not in jobs:
         raise HTTPException(404, "job not found")
@@ -1010,7 +1034,7 @@ def file_cover(path: str):
 
 
 @app.post("/api/revert/{path:path}")
-@path_operation("원본 복원")
+@path_operation("백업 복원")
 def revert_file(path: str, request: RevertRequest):
     with storage.OPERATION_LOCK:
         try:
@@ -1082,17 +1106,20 @@ def path_changes(after: int = 0):
 @app.post("/api/jobs/{job_id}/rename")
 def rename_file(job_id: str, request: RenameRequest):
     if not storage.OPERATION_LOCK.acquire(blocking=False):
-        raise HTTPException(409, "다른 파일 작업이 진행 중입니다. 완료 후 다시 시도하세요")
+        raise HTTPException(409, rename_conflict())
+    activity_token = None
     try:
         if get_active_job():
-            raise HTTPException(409, "대기 또는 진행 중인 스캔 작업이 있습니다")
-        busy = [label for label, count in rename_service.active.items() if count]
+            raise HTTPException(409, rename_conflict())
+        with _activity_lock:
+            busy = [label for label, count in rename_service.active.items() if count]
         with save_tasks_lock:
             if any(t["status"] in ("queued", "saving") for t in save_tasks.values()):
-                busy.append("대기/진행 중인 태그 저장")
+                busy.extend("태그 저장 대기" if t["status"] == "queued" else "태그 저장" for t in save_tasks.values() if t["status"] in ("queued", "saving"))
             if busy:
-                raise HTTPException(409, "진행 중인 작업: " + ", ".join(busy))
+                raise HTTPException(409, rename_conflict(busy, include_saves=False))
             rename_service.renaming = True
+        activity_token = begin_activity("파일명 변경", request.path)
         event = rename_service.rename(MUSIC_ROOT.resolve(), DATA_ROOT, BACKUP_ROOT, jobs, save_jobs,
                                       job_id, request.path, request.stem, request.expected_revision)
         if event["status"] == "unchanged":
@@ -1104,6 +1131,8 @@ def rename_file(job_id: str, request: RenameRequest):
     except (storage.StorageError, OSError, ValueError) as exc:
         raise HTTPException(409, str(exc))
     finally:
+        if activity_token:
+            end_activity(activity_token)
         with save_tasks_lock:
             rename_service.renaming = False
         storage.OPERATION_LOCK.release()
@@ -1117,3 +1146,38 @@ def recover_filename_changes():
         except storage.StorageError:
             # Reads remain available; path-changing operations fail closed until repaired.
             pass
+
+
+def operation_snapshot(include_saves=True):
+    # Never acquire OPERATION_LOCK here: save/restore/rename hold it across file I/O.
+    with _activity_lock:
+        entries = [dict(value) for value in _activity.values()]
+    for key, job in list(jobs.items()):
+        state = job.get("status")
+        if state in ("queued", "scanning", "cancelling"):
+            entries.append({"id": "scan:" + key, "label": "파일 스캔", "state": state,
+                            "path": job.get("current_file") or job.get("sub_path") or ""})
+    if include_saves:
+        with save_tasks_lock:
+            for key, task in save_tasks.items():
+                if task.get("status") in ("queued", "saving"):
+                    entries.append({"id": "save:" + key, "label": "태그 저장", "state": task["status"],
+                                    "path": task.get("current_path") or task.get("current_file") or task.get("sub_path") or ""})
+    for entry in entries:
+        phase = " 대기 중..." if entry["state"] == "queued" else " 중지 중..." if entry["state"] == "cancelling" else " 중..."
+        entry["message"] = entry["label"] + phase
+        entry["file"] = Path(entry["path"]).name if entry["path"] else ""
+    return entries
+
+
+def rename_conflict(fallback=None, include_saves=True):
+    names = list(dict.fromkeys(e["message"].removesuffix("...") for e in operation_snapshot(include_saves)))
+    if not names:
+        names = [label + " 중" for label in fallback or []]
+    return (", ".join(names) + "이어서 파일명을 변경할 수 없습니다. 작업 완료 후 다시 시도하세요."
+            if names else "다른 파일 작업이 진행 중이어서 파일명을 변경할 수 없습니다. 완료 후 다시 시도하세요.")
+
+
+@app.get("/api/background-operations")
+def background_operations():
+    return {"operations": operation_snapshot()}

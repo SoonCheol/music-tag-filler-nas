@@ -209,6 +209,14 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   renamed.run("playingPath='other.mp3';audioPlaying=true;stopRenamedAudio('after.mp3')");assert.equal(renamed.run('playingPath'),'other.mp3');
   const callsBefore=renamed.calls.length;
   renamed.run("renameEditor={stem:'same',input:{value:'same'}}");await renamed.run('submitFilenameEdit()');assert.equal(renamed.calls.length,callsBefore);assert.equal(renamed.run('renameEditor'),null);
+  const ops=harness();
+  ops.run('renderOperationStatus([])');assert.equal(ops.$('operationStatus').hidden,true);
+  ops.run("renderOperationStatus([{message:'가사 검색 중...',path:'Folder/a.mp3',file:'a.mp3'}])");
+  assert.equal(ops.$('operationStatus').hidden,false);assert.equal(ops.$('operationSummary').textContent,'가사 검색 중...');assert.equal(ops.$('operationArrow').hidden,true);
+  ops.run("renderOperationStatus([{message:'가사 검색 중...',path:'Folder/a.mp3',file:'a.mp3'},{message:'앨범 이미지 검색 중...',path:'Folder/b.mp3',file:'b.mp3'}]);toggleOperationDetails()");
+  assert.equal(ops.$('operationSummary').textContent,'백그라운드 작업 2건 진행 중');assert.equal(ops.$('operationDetails').hidden,false);assert.ok(ops.$('operationDetails').innerHTML.includes('b.mp3'));
+  ops.run('toggleOperationDetails()');assert.equal(ops.$('operationDetails').hidden,true);
+  ops.run('renderOperationStatus([])');assert.equal(ops.$('operationStatus').hidden,true);assert.equal(ops.run('operationExpanded'),false);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
   pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});
   pathTip.run("pendingFolder='DANCE/Fitness Latino Path Full';folderLabel()");pathTip.$('folderToggle').listeners.mouseenter();

@@ -25,6 +25,7 @@ body{margin:0;background:var(--bg);font-family:"Malgun Gothic","Apple SD Gothic 
 .main{min-width:1500px;max-width:1720px;margin:0 auto;padding:10px;display:grid;grid-template-columns:minmax(635px,38%) minmax(835px,1fr);gap:10px;align-items:start}
 
 .panel{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.file-heading{display:flex;align-items:center;gap:6px;min-width:0}.operation-status{position:relative;border:1px solid #d0d3d8;border-radius:7px;background:transparent;max-width:240px;font-size:11px;font-weight:400}.operation-status[hidden],#operationDetails[hidden]{display:none}.operation-status button{display:flex;align-items:center;gap:4px;width:100%;padding:2px 6px;border:0;background:transparent;color:var(--muted);font:inherit;cursor:default}.operation-status button[data-multiple="true"]{cursor:pointer}.operation-status button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}#operationSummary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#operationDetails{position:absolute;top:calc(100% + 5px);left:0;z-index:20;width:300px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:var(--card);padding:6px;box-shadow:0 2px 6px #0001}.operation-item{display:block;padding:4px 2px;line-height:1.5;overflow-wrap:anywhere}.operation-file{display:block;color:var(--muted);font-size:10px}.operation-spinner{display:inline-block;animation:operation-spin 1.5s linear infinite}@keyframes operation-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.operation-spinner{animation:none}}
 .panel-head{padding:7px 10px;background:#f6f7f8;border-bottom:1px solid var(--line);font-weight:700;font-size:12px;display:flex;justify-content:space-between;align-items:center}
 .table-wrap{overflow:auto;max-height:560px}
 table{width:100%;border-collapse:collapse;font-size:12px}
@@ -133,7 +134,7 @@ tr.selected{background:var(--blue-light) !important}
   <div class="right-wrap" id="fileColumn">
   <div class="panel">
     <div class="panel-head">
-      <span>파일 목록 <span id="fileCount" class="badge">0</span></span>
+      <span class="file-heading">파일 목록 <span id="fileCount" class="badge">0</span><span class="operation-status" id="operationStatus" hidden><button type="button" id="operationToggle" aria-expanded="false" aria-controls="operationDetails" onclick="toggleOperationDetails()"><span class="operation-spinner" aria-hidden="true">◌</span><span id="operationSummary" role="status" aria-live="polite"></span><span id="operationArrow" hidden aria-hidden="true">⌄</span></button><span id="operationDetails" hidden></span></span></span>
       <span style="display:flex;gap:4px"><input id="fileFilter" class="input" style="width:120px;padding:3px 6px" placeholder="필터"><button class="btn" style="padding:2px 6px;font-size:11px" onclick="toggleSelectAll()">전체선택</button></span>
     </div>
     <div class="table-wrap" id="fileListScroller">
@@ -423,7 +424,26 @@ function renderSaveTasks(tasks){
     box.appendChild(row);
   });
 }
-async function refreshSaveTasks(){try{renderSaveTasks(await api('/api/save-tasks'));}catch(e){}}
+let operationExpanded=false,operationItems=[];
+function renderOperationStatus(items){
+  operationItems=items;const multiple=items.length>1;
+  $('operationStatus').hidden=!items.length;
+  $('operationSummary').textContent=multiple?`백그라운드 작업 ${items.length}건 진행 중`:items[0]?.message||'';
+  $('operationToggle').title=!multiple&&items[0]?.path?items[0].path:'';
+  $('operationToggle').setAttribute('data-multiple',String(multiple));
+  $('operationArrow').hidden=!multiple;
+  if(!multiple)operationExpanded=false;
+  $('operationToggle').setAttribute('aria-expanded',String(operationExpanded));
+  $('operationDetails').hidden=!multiple||!operationExpanded;
+  $('operationDetails').innerHTML=items.map(item=>`<span class="operation-item">${esc(item.message)}${item.file?`<span class="operation-file" title="${esc(item.path)}">${esc(item.file)}</span>`:''}</span>`).join('');
+}
+function toggleOperationDetails(){if(operationItems.length<2)return;operationExpanded=!operationExpanded;renderOperationStatus(operationItems);}
+async function refreshSaveTasks(){
+  await Promise.allSettled([
+    api('/api/save-tasks').then(renderSaveTasks),
+    api('/api/background-operations').then(value=>renderOperationStatus(value.operations||[])).catch(()=>renderOperationStatus([]))
+  ]);
+}
 async function pollSaveTasks(){await refreshSaveTasks();setTimeout(pollSaveTasks,1500);}
 async function deleteSaveTask(id){if(!confirm('저장 작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/save-tasks/'+id,{method:'DELETE'});refreshSaveTasks();}catch(e){alert(e.message)}}
 async function pollJobs(){
