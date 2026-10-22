@@ -22,8 +22,8 @@ body{margin:0;background:var(--bg);font-family:"Malgun Gothic","Apple SD Gothic 
 .btn-red{background:#fff0f0;color:#c00;border-color:#f0c0c0}
 .btn-green{background:#f0faf0;color:#0a6;border-color:#b0e0b0}
 .btn:disabled{opacity:.5}
-.main{max-width:1400px;margin:0 auto;padding:10px;display:grid;grid-template-columns:440px 1fr;gap:10px;align-items:start}
-@media(max-width:900px){.main{grid-template-columns:1fr}}
+.main{max-width:1400px;margin:0 auto;padding:10px;display:grid;grid-template-columns:minmax(520px,46%) minmax(520px,1fr);gap:10px;align-items:start}
+@media(max-width:1099px){.main{grid-template-columns:1fr}}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .panel-head{padding:7px 10px;background:#f6f7f8;border-bottom:1px solid var(--line);font-weight:700;font-size:12px;display:flex;justify-content:space-between;align-items:center}
 .table-wrap{overflow:auto;max-height:560px}
@@ -77,17 +77,22 @@ tr.selected{background:var(--blue-light) !important}
 .change-cover-wrap{position:relative;width:110px;height:110px}
 #saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;margin:0;z-index:2;accent-color:var(--blue);box-shadow:0 0 0 2px #fff;border-radius:2px;cursor:pointer}
 #fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}
-#fileColumn thead tr{height:37px}#fileBody tr{height:32px}
+#fileColumn thead tr{height:37px}#fileBody tr{height:calc(480px / 13)}
 .tag-grid:not(.no-check)>label{display:flex;align-items:center;justify-content:flex-end}
 .chg-check{margin:0;width:14px;height:14px}
 .job-title{min-width:0;overflow-wrap:anywhere}.job .badge{flex-shrink:0}
 .file-name-cell{padding-top:3px;padding-bottom:3px}
-.file-name-content{display:flex;align-items:center;gap:6px;min-width:0}
-.file-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-name-content{display:flex;align-items:center;gap:4px;min-width:0}
+.file-name-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .audio-preview-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:#f8f9fa;color:#374151;font-size:12px;cursor:pointer}
 .audio-preview-button:hover:not(:disabled){background:#e8f0fe;border-color:#9cb9ed}
 .audio-preview-button.playing{color:#2b6de5;background:#e8f0fe}
 .audio-preview-button:disabled{opacity:.4;cursor:default}
+#fileColumn table{table-layout:fixed}#fileColumn td{max-width:none}
+.file-cover,.file-lyrics{width:24px;height:24px;flex:0 0 24px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px;overflow:hidden}
+.file-cover{position:relative;background:#ddd;color:#777}.file-cover img{position:absolute;inset:0;width:24px;height:24px;object-fit:cover}
+.file-lyrics{background:#999;color:#fff;font-size:13px;font-weight:700}.file-lyrics.has-lyrics{background:#111}
+#fileBody .file-empty:hover{background:transparent}#fileBody .file-empty td{padding:0}
 </style>
 </head>
 <body>
@@ -122,7 +127,7 @@ tr.selected{background:var(--blue-light) !important}
     <div class="table-wrap" id="fileListScroller">
       <table>
         <thead><tr><th style="width:30px"><input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)"></th><th style="width:30px">#</th><th id="fileNameHeader" aria-sort="none"><div style="display:flex;align-items:center;gap:8px"><button type="button" id="headerAudio" class="audio-preview-button" disabled title="먼저 파일의 재생 버튼을 눌러 주세요" aria-label="현재 음악 재생" onclick="event.stopPropagation();toggleHeaderAudio()">▶</button><button class="sort-heading" id="sortFileName" onclick="sortFiles('name')">파일명</button></div></th><th id="fileStateHeader" aria-sort="none" style="width:85px"><button class="sort-heading" id="sortFileState" onclick="sortFiles('state')">상태</button></th></tr></thead>
-        <tbody id="fileBody"><tr><td colspan="4" style="text-align:center;padding:30px;color:#999">스캔을 시작하세요</td></tr></tbody>
+        <tbody id="fileBody"><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr><tr class="file-empty" aria-hidden="true"><td colspan="4"></td></tr></tbody>
       </table>
     </div>
     <div class="status-line"><span id="selectedInfo">선택: 0곡</span><span id="progressText"></span></div>
@@ -523,15 +528,36 @@ previewAudio.addEventListener('error',()=>{
   if(playingPath&&[3,4].includes(previewAudio.error?.code))audioUnavailable.add(playingPath);
   audioPlaying=false;previewAudio.pause();updateAudioButtons();
 });
+let fileRowNodes=new Map();
+const fileThumbnailObserver=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{
+  entries.forEach(entry=>{if(entry.isIntersecting){const image=entry.target;image.src=image.dataset.src;image.removeAttribute('data-file-thumbnail');fileThumbnailObserver.unobserve(image);}});
+},{root:$('fileListScroller'),rootMargin:'0px'}):null;
+function fileMediaIcons(r){
+  const original=r.original||{},lyrics=!!original.has_lyrics;
+  const cover=original.has_cover?`<img data-file-thumbnail data-src="/api/thumbnail/${encodeURIComponent(r.path)}?v=${encodeURIComponent(original.revision||'')}" alt="저장된 커버" decoding="async" onerror="this.hidden=true">`:'';
+  return `<span class="file-cover" title="${original.has_cover?'저장된 커버':'커버 없음'}" role="img" aria-label="${original.has_cover?'저장된 커버':'커버 없음'}">♪${cover}</span><span class="file-lyrics${lyrics?' has-lyrics':''}" title="저장된 가사 ${lyrics?'있음':'없음'}" aria-label="저장된 가사 ${lyrics?'있음':'없음'}">L</span>`;
+}
 function renderFileList(){
-  sanitizeChecks();const body=$('fileBody'),scroller=$('fileListScroller'),scrollTop=scroller.scrollTop;
-  if(!filteredResults.length){updateSavePreview();body.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:#999">결과 없음</td></tr>';return;}
-  body.innerHTML='';filteredResults.forEach((r,i)=>{
+  sanitizeChecks();const body=$('fileBody'),scroller=$('fileListScroller'),scrollTop=scroller.scrollTop,nodes=[],next=new Map();
+  filteredResults.forEach((r,i)=>{
     const state=fileState(r),status={auto:'자동선택',review:'확인필요',saved:'저장완료'}[state];
-    const tr=document.createElement('tr');tr.className=i===selectedFileIdx?'selected':'';
-    tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td class="file-name-cell" title="${esc(r.path)}"><div class="file-name-content">${audioButton(r.path,i)}<span class="file-name-text">${esc(r.path.split('/').pop())}</span></div></td><td><span class="file-state file-state-${state}">${status}</span></td>`;
-    tr.onclick=()=>requestSelectFile(i);body.appendChild(tr);
-  });updateSavePreview();scroller.scrollTop=scrollTop;
+    const key=r.path,tr=fileRowNodes.get(key)||document.createElement('tr');
+    const paint=JSON.stringify([i,state,!!r._checked,r.original?.revision,!!r.original?.has_cover,!!r.original?.has_lyrics]);
+    if(tr._filePaint!==paint){
+      tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td class="file-name-cell" title="${esc(r.path)}"><div class="file-name-content">${audioButton(r.path,i)}${fileMediaIcons(r)}<span class="file-name-text">${esc(r.path.split('/').pop())}</span></div></td><td><span class="file-state file-state-${state}">${status}</span></td>`;
+      tr._filePaint=paint;tr.onclick=()=>requestSelectFile(i);
+    }
+    tr.className=i===selectedFileIdx?'selected':'';nodes.push(tr);next.set(key,tr);
+  });
+  for(let i=filteredResults.length;i<13;i++){
+    const key='empty:'+i,tr=fileRowNodes.get(key)||document.createElement('tr');
+    tr.className='file-empty';tr.setAttribute('aria-hidden','true');if(!tr._filePaint){tr.innerHTML='<td colspan="4"></td>';tr._filePaint='empty';}nodes.push(tr);next.set(key,tr);
+  }
+  const previous=Array.from(body.children);
+  if(previous.length!==nodes.length||previous.some((node,i)=>node!==nodes[i]))body.replaceChildren(...nodes);
+  fileRowNodes=next;
+  if(fileThumbnailObserver){fileThumbnailObserver.disconnect();document.querySelectorAll('[data-file-thumbnail]').forEach(image=>fileThumbnailObserver.observe(image));}
+  updateAudioButtons();updateSavePreview();scroller.scrollTop=scrollTop;
 }
 function toggleCheck(i){const r=filteredResults[i];if(r&&fileState(r)==='auto')r._checked=!r._checked;renderFileList();}
 function toggleSelectAll(checked){
@@ -785,7 +811,7 @@ function plannedChanges(r){
   const changes=tagFields.filter(f=>active&&r._fields.includes(f)&&(!emptyOnly||!base[f])&&String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||'')!==String(base[f]));
   const cover=$('saveCover').checked&&(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&r._fields.length>0&&hasCandidateCoverSource(r)));
   const final={...base};changes.forEach(f=>final[f]=String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||''));
-  const lyrics=active&&$('fillLyrics').checked&&(!String(r.original?.lyrics||'').trim()||r.original?.lyrics_marker)&&!!final.title&&!!final.artist;
+  const lyrics=active&&$('fillLyrics').checked&&(!(r.original?.has_lyrics??!!String(r.original?.lyrics||'').trim())||r.original?.lyrics_marker)&&!!final.title&&!!final.artist;
   return {changes,cover,lyrics,rename:$('renameFiles').checked,ids:active&&!!candidate&&$('includeIds').checked};
 }
 function planSummary(rows){
@@ -839,12 +865,13 @@ function searchSummary(r){
   return (labels[r.search_status]||r.search_status||'대기 중')+(r.country?' ['+r.country+']':'')+(errors?' — '+errors:'');
 }
 function showLyricsStatus(r){
-  const text=r.original?.lyrics||r.lyrics||'';const marker=r.original?.lyrics_marker;
+  const text=r.original?.lyrics||'',present=r.original?.has_lyrics??!!text,marker=r.original?.lyrics_marker;
+  const lines=r.original?.lyrics_lines??(text?text.split('\n').length:0);
   const labels={busy:'서버 혼잡·재시도 가능',conflict:'가사 내용 불일치',instrumental:'반주 곡',no_lyrics:'가사 없는 기록',none:'찾지 못함',need_tags:'제목·가수 필요',found:'가사 있음'};
-  $('lyricStatus').textContent=marker?'표시만 있음':text?`있음 (${text.split('\n').length}줄)`:(labels[r.last_save?.lyrics_status]||'없음');
-  $('lyricStatus').className='badge'+(text&&!marker?' badge-ok':'');
+  $('lyricStatus').textContent=marker?'표시만 있음':present?`있음${lines?' ('+lines+'줄)':''}`:(labels[r.last_save?.lyrics_status]||'없음');
+  $('lyricStatus').className='badge'+(present&&!marker?' badge-ok':'');
   $('lyricStatus').title='클릭하면 가사 또는 상태를 표시합니다';
-  $('lyricStatus').onclick=()=>alert(text||$('lyricStatus').textContent);
+  $('lyricStatus').onclick=async()=>{if(!present)return alert($('lyricStatus').textContent);try{const value=await api('/api/lyrics/'+encodeURIComponent(r.path));alert(value.lyrics||'없음');}catch(e){alert('가사 읽기 실패: '+e.message);}};
 }
 async function manualSearch(){
   if(!editingResult)return alert('파일을 선택하세요');if(saving||searching)return;
@@ -933,6 +960,7 @@ folderPathButton.addEventListener('mouseenter',()=>showButtonTooltip(folderPathB
 folderPathButton.addEventListener('focus',()=>showButtonTooltip(folderPathButton,pendingFolder||'전체'));
 folderPathButton.addEventListener('mouseleave',hideButtonTooltip);folderPathButton.addEventListener('blur',hideButtonTooltip);folderPathButton.addEventListener('click',hideButtonTooltip);
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideButtonTooltip();});
+renderFileList();
 loadPreferences();
 loadFolders();
 pollJobs();

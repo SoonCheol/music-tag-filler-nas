@@ -59,8 +59,8 @@ def describe(path):
             "albumartist": info.tags.album_artist, "date": info.tags.year,
             "tracknumber": info.tags.track, "genre": info.tags.genre,
             "duration": info.length, "format": info.fmt, "bitrate": info.bitrate,
-            "sample_rate": info.sample_rate, "ids": info.ids.as_dict(), "has_cover": info.cover is not None,
-            "has_lyrics": bool(info.lyrics.strip()), "lyrics": info.lyrics,
+            "sample_rate": info.sample_rate, "ids": info.ids.as_dict(), "has_cover": bool(info.cover),
+            "has_lyrics": bool(info.lyrics.strip()), "lyrics_lines": len(info.lyrics.splitlines()) if info.lyrics.strip() else 0,
             "lyrics_marker": search_lyrics.marker_only(info.lyrics),
             "revision": after}
 

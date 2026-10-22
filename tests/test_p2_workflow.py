@@ -33,7 +33,8 @@ class P2Tests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             response = exc
         self.assertEqual(response.code, expected)
-        return response.read()
+        with response:
+            return response.read()
 
     def test_multipath_dedup_nonrecursive_case_and_escape(self):
         first = self.copy("Album/A.MP3")
@@ -558,6 +559,87 @@ class P2Tests(unittest.TestCase):
             self.assertEqual(result['failed'], 0)
             self.assertEqual(result['saved'], 1)
             self.assertEqual(p0.tags.read_cover(str(path)), before)
+
+    def test_list_media_flags_reuse_scan_read_and_never_send_lyrics_body(self):
+        for blank in (False, True):
+            path = self.copy('flags-' + str(blank) + '.mp3', blank=blank)
+            with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+                info = storage.describe(path)
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(info['has_cover'], not blank)
+            self.assertEqual(info['has_lyrics'], not blank)
+            self.assertNotIn('lyrics', info)
+        row = self.job([self.copy('legacy.mp3')])[0]
+        row['original']['lyrics'] = 'PRIVATE STORED LYRICS'
+        row['lyrics'] = 'ONLINE LYRICS MUST NOT APPEAR IN LIST'
+        with patch.object(p0.tags, 'read_file', side_effect=AssertionError('list must not reread music')):
+            listed = self.raw_http('/api/jobs')
+            detail = self.raw_http('/api/jobs/test')
+        self.assertNotIn(b'PRIVATE STORED LYRICS', listed + detail)
+        self.assertNotIn(b'ONLINE LYRICS', listed + detail)
+        self.assertEqual(row['original']['lyrics'], 'PRIVATE STORED LYRICS')
+
+    def test_file_thumbnails_four_formats_cached_and_individually_invalidated(self):
+        import io
+        from PIL import Image
+        main._thumbnail_cache.clear()
+        paths = [self.copy('thumb.' + ext) for ext in ('mp3', 'flac', 'm4a', 'ogg')]
+        original_bytes = [(path.read_bytes(), path.stat().st_mtime_ns) for path in paths]
+        def route(path):
+            return '/api/thumbnail/' + urllib.parse.quote(path.name)
+        with patch.object(search_service.net, 'get_bytes', side_effect=AssertionError('no external images')):
+            with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+                for path in paths:
+                    image = Image.open(io.BytesIO(self.raw_http(route(path))))
+                    self.assertEqual(image.size, (24, 24))
+                    self.raw_http(route(path))
+                self.assertEqual(read.call_count, 4)
+            for path, before in zip(paths, original_bytes):
+                self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+            info = p0.tags.read_file(str(paths[0]))
+            p0.tags.write_file(str(paths[0]), info.tags, p0.image_bytes('blue'))
+            with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+                self.raw_http(route(paths[1]))
+                self.raw_http(route(paths[0]))
+                self.assertEqual(read.call_count, 1)
+            response = urllib.request.urlopen('http://127.0.0.1:' + str(self.port) + route(paths[0]))
+            request = urllib.request.Request(response.url, headers={'If-None-Match': response.headers['ETag']})
+            response.close()
+            with self.assertRaises(urllib.error.HTTPError) as unchanged:
+                urllib.request.urlopen(request)
+            self.assertEqual(unchanged.exception.code, 304)
+            unchanged.exception.close()
+            blank = self.copy('no-cover.mp3', blank=True)
+            with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+                self.raw_http(route(blank), expected=404)
+                self.raw_http(route(blank), expected=404)
+                self.assertEqual(read.call_count, 1)
+
+    def test_thumbnail_cache_bound_concurrent_requests_and_path_validation(self):
+        from fastapi import Request
+        from concurrent.futures import ThreadPoolExecutor
+        main._thumbnail_cache.clear()
+        paths = [self.copy(str(i) + '.mp3') for i in range(3)]
+        with patch.object(main, '_THUMBNAIL_LIMIT', 2):
+            with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+                with ThreadPoolExecutor(max_workers=3) as pool:
+                    list(pool.map(lambda _: main.file_thumbnail(paths[0].name, Request({'type':'http','headers':[]})), range(3)))
+                self.assertEqual(read.call_count, 1)
+            for path in paths[1:]:
+                main.file_thumbnail(path.name, Request({'type':'http','headers':[]}))
+            self.assertEqual(len(main._thumbnail_cache), 2)
+        self.raw_http('/api/thumbnail/..%2Foutside.mp3', expected=400)
+        self.raw_http('/api/thumbnail/%2Foutside.mp3', expected=400)
+        (self.root / 'link.mp3').symlink_to(paths[0])
+        self.raw_http('/api/thumbnail/link.mp3', expected=400)
+
+    def test_existing_lyric_viewer_reads_only_on_explicit_request(self):
+        path = self.copy('lyrics.mp3')
+        with patch.object(p0.tags, 'read_file', wraps=p0.tags.read_file) as read:
+            value = json.loads(self.raw_http('/api/lyrics/lyrics.mp3'))
+            self.assertEqual(value['lyrics'], self.lyrics)
+            self.assertEqual(read.call_count, 1)
+        self.raw_http('/api/lyrics/..%2Foutside.mp3', expected=400)
 
     def test_audio_stream_ranges_head_and_read_only(self):
         def stream(path,range_value=None,method='GET'):

@@ -83,6 +83,32 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(emptyCover.run('saveItem(editingResult).include_cover'),false);
   assert.equal(emptyCover.run('saveItem(editingResult).cover_id'),null);
 
+  const list=harness();
+  assert.equal(list.$('fileBody').children.length,13);
+  assert.ok(list.$('fileBody').children.every(row=>row.className==='file-empty'&&!row.innerHTML.includes('input')));
+  list.context.listJob={id:'media-list',results:Array.from({length:6},(_,i)=>({path:'file'+i+'.mp3',file_state:'auto',original:{revision:'a'.repeat(64),has_cover:i%2===0,has_lyrics:i%3===0},lyrics:'Online result must not set stored flag'}))};
+  list.run('adoptJob(listJob)');
+  assert.equal(list.$('fileBody').children.length,13);
+  assert.equal(list.$('fileBody').children.filter(row=>row.className==='file-empty').length,7);
+  const retainedRow=list.$('fileBody').children[0];const retainedMarkup=retainedRow.innerHTML;
+  list.run('renderFileList()');assert.equal(list.$('fileBody').children[0],retainedRow);assert.equal(retainedRow.innerHTML,retainedMarkup);
+  assert.ok(retainedMarkup.includes('data-file-thumbnail'));assert.ok(retainedMarkup.includes('file-lyrics has-lyrics'));
+  const noMedia=list.$('fileBody').children[1].innerHTML;assert.ok(!noMedia.includes('data-file-thumbnail'));assert.ok(!noMedia.includes('file-lyrics has-lyrics'));
+  assert.ok(retainedMarkup.indexOf('audio-preview-button')<retainedMarkup.indexOf('file-cover'));
+  assert.ok(retainedMarkup.indexOf('file-cover')<retainedMarkup.indexOf('file-lyrics'));
+  assert.ok(retainedMarkup.indexOf('file-lyrics')<retainedMarkup.indexOf('file-name-text'));
+  list.run("currentResults[0].file_state='saved';renderFileList()");assert.equal(list.$('fileBody').children[0],retainedRow);
+  list.context.longJob={id:'long-list',results:Array.from({length:20},(_,i)=>({path:i+'.mp3',original:{revision:'a'.repeat(64)}}))};
+  list.run('adoptJob(longJob)');assert.equal(list.$('fileBody').children.length,20);
+  assert.ok(!list.$('fileBody').children.some(row=>row.className==='file-empty'));
+  assert.ok(html.includes("root:$('fileListScroller'),rootMargin:'0px'"));
+  list.run("editingResult._selection='edit';editingResult._draft.title='Known';editingResult._draft.artist='Singer';editingResult.original.has_lyrics=true");
+  list.$('fillLyrics').checked=true;
+  assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),false);
+  list.run('editingResult.original.has_lyrics=false');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),true);
+  list.run('editingResult.original.has_lyrics=true;editingResult.original.lyrics_marker=true');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),true);
+
+
   const hover=harness(),hoverImages=[];
   const create=hover.context.document.createElement;
   hover.context.document.createElement=tag=>{const node=create(tag);if(tag==='img')hoverImages.push(node);return node;};
@@ -137,7 +163,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   thumbnail.onmouseenter();assert.equal(hoverOnly.$('hoverPrev').style.display,'block');
   thumbnail.onmouseleave();assert.equal(hoverOnly.$('hoverPrev').style.display,'none');
   assert.ok(html.includes('#fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}'));
-  assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:32px}'));
+  assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:calc(480px / 13)}'));
   assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><input id="chg_album"/);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
   pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});

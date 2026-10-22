@@ -12,7 +12,7 @@ function element() {
   return { value: '', checked: false, hidden: true, style: {}, children: [], listeners: {},
     showModal() { this.open=true; }, close() { this.open=false; }, innerHTML: '', textContent: '', classList: { add() {}, remove() {} },
     setAttribute() {}, focus() {}, appendChild(child) { this.children.push(child); },
-    replaceChildren() { this.children = []; },
+    replaceChildren(...children) { this.children = children; },
     addEventListener(name, callback) { this.listeners[name] = callback; }, contains() { return false; } };
 }
 function $(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }
@@ -252,8 +252,8 @@ function result(path) {
     {...result('saved.mp3'),file_state:'saved'},result('auto2.mp3')]};
   $('fileFilter').value='';run('adoptJob(statesJob);currentResults.forEach(r=>r._checked=true);renderFileList()');
   assert.deepEqual(JSON.parse(run('JSON.stringify(currentResults.map(r=>!!r._checked))')),[true,false,false,true]);
-  assert.equal($('fileBody').children.slice(-4)[1].innerHTML.includes('disabled'),true);
-  assert.equal($('fileBody').children.slice(-4)[2].innerHTML.includes('disabled'),true);
+  assert.equal($('fileBody').children.filter(row=>row.className!=='file-empty')[1].innerHTML.includes('disabled'),true);
+  assert.equal($('fileBody').children.filter(row=>row.className!=='file-empty')[2].innerHTML.includes('disabled'),true);
   $('fileFilter').value='auto1';run('applyFilter()');
   await acceptSave('saveSelected()');assert.deepEqual(sent.at(-1).body.paths,['auto1.mp3','auto2.mp3']);
   assert.deepEqual(sent.at(-1).body.checked_paths,['auto1.mp3','auto2.mp3']);

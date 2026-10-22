@@ -10,6 +10,8 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, ConfigDict
 import mutagen
 from functools import wraps
+from collections import OrderedDict
+import io
 from . import storage, search_service, job_service, preferences
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
@@ -249,13 +251,27 @@ def start_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(scan_job, job_id, req.sub_path, req.model_dump(), False)
     return {"job_id": job_id}
 
+def public_job(job):
+    # Legacy job files may still contain lyrics: never include bodies in list data.
+    results = []
+    for row in job.get("results", []):
+        original = row.get("original", {})
+        compact = {key: value for key, value in original.items() if key != "lyrics"}
+        if "lyrics" in original:
+            text = original.get("lyrics") or ""
+            compact.setdefault("has_lyrics", bool(text.strip()))
+            compact.setdefault("lyrics_lines", len(text.splitlines()) if text.strip() else 0)
+        results.append({**{key: value for key, value in row.items() if key not in ("lyrics", "original")}, "original": compact})
+    return {**job, "results": results}
+
+
 @app.get("/api/jobs")
 @job_locked
 def list_jobs():
     for job in jobs.values():
         for result in job.get("results", []):
             prepare_result(result)
-    return sorted(jobs.values(), key=lambda x: x.get("created_at",0), reverse=True)
+    return [public_job(job) for job in sorted(jobs.values(), key=lambda x: x.get("created_at",0), reverse=True)]
 
 @app.get("/api/jobs/{job_id}")
 @job_locked
@@ -264,7 +280,7 @@ def get_job(job_id: str):
         raise HTTPException(404, "job not found")
     for result in jobs[job_id].get("results", []):
         prepare_result(result)
-    return jobs[job_id]
+    return public_job(jobs[job_id])
 
 @app.post("/api/jobs/{job_id}/cancel")
 @job_locked
@@ -789,6 +805,60 @@ def stream_audio(path: str, request: Request):
 def file_info(path: str):
     try:
         return storage.describe(storage.resolve_music(MUSIC_ROOT, path))
+    except (storage.StorageError, OSError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+# One bounded entry per file; a revision/stat change replaces only that entry.
+_thumbnail_cache = OrderedDict()
+_thumbnail_lock = threading.Lock()
+_THUMBNAIL_LIMIT = 256
+
+
+@app.get("/api/thumbnail/{path:path}")
+def file_thumbnail(path: str, request: Request, v: Optional[str] = None):
+    try:
+        target = storage.resolve_music(MUSIC_ROOT, path)
+        stat = target.stat()
+        signature = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        key = str(target)
+        with _thumbnail_lock:
+            cached = _thumbnail_cache.get(key)
+            if cached is None or cached[0] != signature:
+                info = original_tags.read_file(str(target))
+                thumbnail = None
+                if info.cover:
+                    from PIL import Image
+                    with Image.open(io.BytesIO(info.cover)) as image:
+                        image.thumbnail((24, 24))
+                        output = io.BytesIO()
+                        image.convert("RGB").save(output, "JPEG", quality=80)
+                        thumbnail = output.getvalue()
+                after = target.stat()
+                if signature != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                    raise HTTPException(409, "파일이 변경되었습니다. 다시 불러오세요")
+                cached = (signature, thumbnail, storage.digest(repr((key, signature)).encode()))
+                _thumbnail_cache[key] = cached
+            _thumbnail_cache.move_to_end(key)
+            while len(_thumbnail_cache) > _THUMBNAIL_LIMIT:
+                _thumbnail_cache.popitem(last=False)
+        if not cached[1]:
+            raise HTTPException(404, "표지 없음")
+        headers = {"ETag": '"' + cached[2] + '"',
+                   "Cache-Control": "private, max-age=86400" if v else "private, max-age=0, must-revalidate"}
+        if request.headers.get("if-none-match") == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return Response(cached[1], media_type="image/jpeg", headers=headers)
+    except (storage.StorageError, OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/lyrics/{path:path}")
+def file_lyrics(path: str):
+    # Existing lyric viewer fetches content only on an explicit click, never per row.
+    try:
+        info = original_tags.read_file(str(storage.resolve_music(MUSIC_ROOT, path)))
+        return {"lyrics": info.lyrics}
     except (storage.StorageError, OSError) as exc:
         raise HTTPException(400, str(exc))
 
