@@ -19,13 +19,14 @@ function $(id) { if (!elements.has(id)) elements.set(id, element()); return elem
 for (const field of ['title', 'artist', 'album', 'albumartist', 'track', 'year', 'genre']) {
   const check = element(); check.checked = true; check.dataset = { field }; checks.push(check);
 }
-$('saveCover').checked=true;
+$('saveCover').checked=true;$('saveLyrics').checked=true;
 $('onlyEmpty').checked = false;$('coverMax').value=1000;
 const context = vm.createContext({ console, Set, Map, encodeURIComponent,
   document: { getElementById: $, createElement: element, addEventListener() {},
     querySelectorAll(selector) { return selector === '.chg-check' ? checks : []; } },
   alert: message => notices.push(message), confirm: () => true,
   fetch: async (url, options) => {
+    if(url.startsWith('/api/lyrics/'))return {ok:true,text:async()=>JSON.stringify({lyrics:''})};
     const body = JSON.parse(options.body); sent.push({ url, body });
     if (url.endsWith('/search')) return { ok: true, text: async () => JSON.stringify({
       ...result(body.path), search_status: 'matched', search_errors: [], country: body.country

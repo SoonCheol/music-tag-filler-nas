@@ -206,7 +206,7 @@ def prepare_cover_change(data, current, max_px=1000):
 
 
 def save(path, root, backup_root, values, fields, only_empty, expected,
-         cover=None, lyrics=None, rename=False, ids=None):
+         cover=None, lyrics=None, rename=False, ids=None, replace_lyrics=False):
     if revision(path) != expected:
         raise StorageError("스캔/확인 이후 파일이 변경되었습니다. 다시 스캔하세요")
     info = tags.read_file(str(path))
@@ -223,9 +223,9 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
     prepared = None
     if cover is not None and not (only_empty and info.cover is not None):
         prepared = prepare_cover_change(cover, info.cover)
-    # Existing real lyrics are never replaced. Player markers can be replaced
-    # only by a validated fetched lyric; the P0 first backup preserves the marker.
-    if (info.lyrics.strip() and not search_lyrics.marker_only(info.lyrics)) or not lyrics or lyrics.strip() == info.lyrics.strip():
+    # Empty input never deletes lyrics. Replacement requires explicit verified consent.
+    existing_lyrics = bool(info.lyrics.strip() and not search_lyrics.marker_only(info.lyrics))
+    if (existing_lyrics and (only_empty or not replace_lyrics)) or not lyrics or not lyrics.strip() or lyrics.strip() == info.lyrics.strip():
         lyrics = None
     rename_needed = bool(rename and tags.rename_target(str(path), new_tags))
     if new_tags == info.tags and final_ids == info.ids and prepared is None and lyrics is None and not rename_needed:

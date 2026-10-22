@@ -641,6 +641,149 @@ class P2Tests(unittest.TestCase):
             self.assertEqual(read.call_count, 1)
         self.raw_http('/api/lyrics/..%2Foutside.mp3', expected=400)
 
+    def lyrics_search(self, row, **changes):
+        value = {'path': row['path'], 'expected_revision': row['original']['revision'],
+                 'title': row['original']['title'], 'artist': row['original']['artist']}
+        value.update(changes)
+        return self.http(value, route='/api/jobs/test/lyrics-search')
+
+    def test_lyrics_search_states_cache_and_read_only(self):
+        states = ((main.original_lyrics.FOUND, 'New line one\nNew line two', 'found'),
+                  (main.original_lyrics.NOT_FOUND, '', 'not_found'),
+                  (main.original_lyrics.FOUND, '', 'not_found'),
+                  (main.original_lyrics.BUSY, '', 'error'),
+                  (main.original_lyrics.CONFLICT, '', 'error'))
+        for index, (status, text, expected) in enumerate(states):
+            path = self.copy('search-state-' + str(index) + '.mp3')
+            row = self.job([path])[0]
+            before = path.read_bytes(), path.stat().st_mtime_ns
+            job_before = copy.deepcopy(main.jobs['test'])
+            found = main.original_lyrics.LyricsResult(status, text)
+            with patch.object(main.original_lyrics, 'find', return_value=found) as find:
+                first = self.lyrics_search(row)
+                again = self.lyrics_search(row)
+                self.assertEqual(find.call_count, 1)
+            self.assertEqual(first['status'], expected)
+            self.assertEqual(first['lyrics'], text)
+            self.assertTrue(first['searched'])
+            self.assertEqual(first['lyrics_id'], again['lyrics_id'])
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+            self.assertEqual(main.jobs['test'], job_before)
+            self.assertFalse(self.backups.exists())
+        missing = self.lyrics_search(row, title='', artist='')
+        self.assertEqual(missing['status'], 'error')
+        self.assertFalse(missing['searched'])
+
+    def test_lyrics_search_duplicate_requests_share_one_lookup(self):
+        from concurrent.futures import ThreadPoolExecutor
+        path = self.copy('concurrent-lyrics.mp3')
+        row = self.job([path])[0]
+        request = main.LyricsSearchRequest(path=row['path'], expected_revision=row['original']['revision'],
+                                           title=row['original']['title'], artist=row['original']['artist'])
+        entered, release = threading.Event(), threading.Event()
+        def lookup(*args):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return main.original_lyrics.LyricsResult(main.original_lyrics.FOUND, 'Concurrent lyrics')
+        with patch.object(main.original_lyrics, 'find', side_effect=lookup) as find:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(main.search_file_lyrics, 'test', request)
+                self.assertTrue(entered.wait(5))
+                second = pool.submit(main.search_file_lyrics, 'test', request)
+                release.set()
+                self.assertEqual(first.result(5)['lyrics_id'], second.result(5)['lyrics_id'])
+            self.assertEqual(find.call_count, 1)
+
+    def test_manual_lyrics_save_options_all_formats_and_scopes(self):
+        new_text = 'Verified new lyric line one\nVerified new lyric line two'
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            for scope in ('current', 'selected', 'all'):
+                for existing in (False, True):
+                    for checked in (False, True):
+                        for only_empty in (False, True):
+                            with self.subTest(ext=ext, scope=scope, existing=existing, checked=checked, only_empty=only_empty):
+                                stem = f'lyric-{scope}-{existing}-{checked}-{only_empty}'
+                                paths = [self.copy(stem + str(i) + '.' + ext, blank=not existing)
+                                         for i in range(1 if scope == 'current' else 2)]
+                                if not existing:
+                                    for path in paths:
+                                        p0.tags.write_file(str(path), p0.tags.Tags(title='Temporary song', artist='Singer'))
+                                rows = self.job(paths)
+                                before = [(path.read_bytes(), path.stat().st_mtime_ns, p0.tags.read_cover(str(path))) for path in paths]
+                                items = []
+                                with patch.object(main.original_lyrics, 'find', return_value=main.original_lyrics.LyricsResult(main.original_lyrics.FOUND, new_text)):
+                                    for row in rows:
+                                        found = self.lyrics_search(row)
+                                        items.append(self.item(row, fields=[], values={}, lyrics_id=found['lyrics_id']))
+                                with patch.object(main.original_lyrics, 'find', side_effect=AssertionError('save must reuse searched lyric')):
+                                    response = self.http(self.request(items, scope=scope, save_lyrics=checked, only_empty=only_empty))
+                                self.assertEqual(response['failed'], 0)
+                                self.assertEqual(response['partial'], 0)
+                                replace = checked and not (only_empty and existing)
+                                for path, old in zip(paths, before):
+                                    self.assertEqual(p0.tags.read_file(str(path)).lyrics, new_text if replace else self.lyrics if existing else '')
+                                    self.assertEqual(p0.tags.read_cover(str(path)), old[2])
+                                    if not replace:
+                                        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), old[:2])
+                                self.assertEqual(list(main.save_tasks.values())[-1]['status'], 'done')
+
+    def test_unsearched_empty_or_not_found_lyrics_always_preserve_file(self):
+        for existing in (False, True):
+            for mode in ('missing', 'null', 'empty', 'not_found'):
+                path = self.copy(f'preserve-{existing}-{mode}.mp3', blank=not existing)
+                if not existing:
+                    p0.tags.write_file(str(path), p0.tags.Tags(title='Song', artist='Singer'))
+                row = self.job([path])[0]
+                item = self.item(row, fields=[], values={})
+                if mode == 'null': item['lyrics_id'] = None
+                if mode == 'empty': item['lyrics_id'] = ''
+                if mode == 'not_found':
+                    with patch.object(main.original_lyrics, 'find', return_value=main.original_lyrics.LyricsResult(main.original_lyrics.NOT_FOUND)):
+                        item['lyrics_id'] = self.lyrics_search(row)['lyrics_id']
+                before = path.read_bytes(), path.stat().st_mtime_ns
+                with patch.object(main.original_lyrics, 'find', side_effect=AssertionError('option alone must not search')):
+                    response = self.http(self.request([item], save_lyrics=True, fill_lyrics=True, only_empty=False))
+                self.assertEqual(response['failed'], 0)
+                self.assertEqual(response['saved'], 0)
+                self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+
+    def test_lyrics_choice_is_bound_to_file_job_revision_and_query(self):
+        paths = [self.copy('bound-a.mp3'), self.copy('bound-b.mp3')]
+        rows = self.job(paths)
+        with patch.object(main.original_lyrics, 'find', return_value=main.original_lyrics.LyricsResult(main.original_lyrics.FOUND, 'Bound lyrics')):
+            token = self.lyrics_search(rows[0])['lyrics_id']
+        before = [path.read_bytes() for path in paths]
+        wrong_file = self.item(rows[1], fields=[], values={}, lyrics_id=token)
+        self.assertEqual(self.http(self.request([wrong_file], save_lyrics=True))['failed'], 1)
+        changed_query = self.item(rows[0], values={'title':'Another title'}, fields=['title'], lyrics_id=token)
+        self.assertEqual(self.http(self.request([changed_query], save_lyrics=True))['failed'], 1)
+        main.jobs['other'] = copy.deepcopy(main.jobs['test'])
+        wrong_job = self.item(rows[0], fields=[], values={}, lyrics_id=token)
+        self.assertEqual(self.http(self.request([wrong_job], save_lyrics=True), route='/api/jobs/other/save')['failed'], 1)
+        entry = next(e for e in main._lyrics_cache.values() if e['lyrics_id'] == token)
+        entry['expires'] = 0
+        self.assertEqual(self.http(self.request([wrong_job], save_lyrics=True))['failed'], 1)
+        self.assertEqual(self.http(self.request([wrong_job], save_lyrics=False))['failed'], 0)
+        self.assertEqual(before, [path.read_bytes() for path in paths])
+        self.http({'path': rows[0]['path'], 'expected_revision': '0'*64, 'title':'Song','artist':'Singer'}, route='/api/jobs/test/lyrics-search', expected=409)
+        self.http({'path':'../outside.mp3', 'expected_revision':'0'*64,'title':'Song','artist':'Singer'}, route='/api/jobs/test/lyrics-search', expected=404)
+
+    def test_explicit_lyrics_replacement_retains_first_backup_and_ignores_blank(self):
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            path = self.copy('lyrics-restore.' + ext)
+            original = path.read_bytes()
+            result = storage.save(path, self.root, self.backups, {}, [], False, storage.revision(path),
+                                  lyrics='New actual embedded lyrics\nSecond line', replace_lyrics=True)
+            self.assertEqual(result['status'], 'saved')
+            self.assertEqual(p0.tags.read_file(str(path)).lyrics, 'New actual embedded lyrics\nSecond line')
+            storage.restore(path, self.root, self.backups, storage.revision(path))
+            self.assertEqual(path.read_bytes(), original)
+            for blank in (None, '', '   '):
+                before = path.read_bytes(), path.stat().st_mtime_ns
+                result = storage.save(path, self.root, self.backups, {}, [], False, storage.revision(path), lyrics=blank, replace_lyrics=True)
+                self.assertEqual(result['status'], 'skipped')
+                self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+
     def test_audio_stream_ranges_head_and_read_only(self):
         def stream(path,range_value=None,method='GET'):
             request=urllib.request.Request('http://127.0.0.1:'+str(self.port)+'/api/audio/'+urllib.parse.quote(path,safe=''),method=method,headers={'Range':range_value} if range_value else {})

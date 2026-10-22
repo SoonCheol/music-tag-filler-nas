@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v2.0.0` |
-| 이미지 ID | `sha256:3cd975314d826d83f0a597e0deb22a614de4c28853ea670facd19a66701c9adf` |
+| 이미지 ID | `sha256:d4b7f9c2accbc011f3a05f1b1704bee0a8a64eaf00baccaf43ef83a94dd7802d` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -170,3 +170,9 @@ GitHub push 없음. 다른 작업의 AGENTS.md 변경은 커밋에서 제외.
 13행·파일 커버/가사 아이콘·폭 조정 및 지연 로딩을 기존 배포 스크립트로 반영했다.
 [파일 목록 검증 기록](FILE_LIST_VALIDATION.md)에 동일 임시 80곡 속도 비교, 81개 회귀 검사,
 임시 브라우저 저장·재생 및 운영 UI 확인 범위를 기록했다. 마운트·포트·환경·권한은 유지한다.
+
+
+## 2026-10-22 가사 UI·검색·저장 개선
+
+기존 배포 스크립트로 동일 v2.0.0 이미지 태그에 반영했다. 마운트·포트·환경·권한 검사를 통과했다.
+[가사 검증 기록](LYRICS_UI_VALIDATION.md)에 임시 음원 저장·검색 상태·운영 UI 확인 범위를 기록했다.

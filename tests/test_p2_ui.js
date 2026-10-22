@@ -20,7 +20,9 @@ function harness() {
     alert(){},confirm:()=>true,setTimeout(){},fetch:async(url,options={})=>{let body=options.body;
       if(typeof body==='string')body=JSON.parse(body);calls.push({url,body,method:options.method});
       let value=[];
-      if(url==='/api/jobs')value=context.jobsResponse||[];
+      if(url.startsWith('/api/lyrics/'))value={lyrics:context.storedLyricText||''};
+      else if(url.endsWith('/lyrics-search'))value=context.lyricResponse||{status:'not_found',searched:true,lyrics:'',lyrics_id:'no-result'};
+      else if(url==='/api/jobs')value=context.jobsResponse||[];
       else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
       else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
       else if(url==='/api/scan')value={job_id:'scan'};
@@ -31,7 +33,7 @@ function harness() {
     load(){this.loads++;this.currentTime=0;this.currentSrc=this.src;this.ended=false;},
     pause(){this.paused=true;this.listeners.pause?.();},
     async play(){this.plays++;this.paused=false;this.currentSrc=this.src;this.listeners.playing?.();}});
-  $('saveCover').checked=true;
+  $('saveCover').checked=true;$('saveLyrics').checked=true;
   vm.runInContext(script,context);
   return {$,calls,context,documentEvents,run:code=>vm.runInContext(code,context)};
 }
@@ -105,9 +107,38 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   list.run("editingResult._selection='edit';editingResult._draft.title='Known';editingResult._draft.artist='Singer';editingResult.original.has_lyrics=true");
   list.$('fillLyrics').checked=true;
   assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),false);
-  list.run('editingResult.original.has_lyrics=false');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),true);
-  list.run('editingResult.original.has_lyrics=true;editingResult.original.lyrics_marker=true');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),true);
+  list.run('editingResult.original.has_lyrics=false');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),false);
+  list.run('editingResult.original.has_lyrics=true;editingResult.original.lyrics_marker=true');assert.equal(list.run('!!plannedChanges(editingResult).lyrics'),false);
 
+
+  const lyricUI=harness();lyricUI.context.storedLyricText='Stored line one\nStored line two';
+  lyricUI.context.lyricJob={id:'lyrics-ui',results:[{path:'with.mp3',original:{title:'Song one',artist:'Singer',has_lyrics:true,revision:'a'.repeat(64)},candidates:[]},{path:'without.mp3',original:{title:'Song two',artist:'Singer',has_lyrics:false,revision:'b'.repeat(64)},candidates:[]}]};
+  lyricUI.run('adoptJob(lyricJob)');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(lyricUI.$('currentLyrics').textContent,'Stored line one\nStored line two');assert.equal(lyricUI.$('changeLyrics').textContent,'검색 안 함');
+  lyricUI.$('fillLyrics').checked=true;lyricUI.run('updateSavePreview()');assert.equal(lyricUI.$('changeLyrics').textContent,'검색 안 함');
+  assert.equal(lyricUI.calls.filter(c=>c.url.endsWith('/lyrics-search')).length,0);
+  const lyricFetch=lyricUI.context.fetch;let finishLyric,lyricRequests=0;
+  lyricUI.context.fetch=(url,options)=>{if(url.endsWith('/lyrics-search')){lyricRequests++;return new Promise(resolve=>finishLyric=resolve);}return lyricFetch(url,options);};
+  const pendingLyric=lyricUI.run('searchLyricsForCurrent()');await lyricUI.run('searchLyricsForCurrent()');
+  assert.equal(lyricRequests,1);assert.equal(lyricUI.$('changeLyrics').textContent,'검색 중...');
+  lyricUI.run('selectFile(1)');assert.equal(lyricUI.$('currentLyrics').textContent,'가사 없음');assert.equal(lyricUI.$('changeLyrics').textContent,'검색 안 함');
+  lyricUI.run("adoptJob({id:'lyrics-ui',results:currentResults.map(r=>({...r,original:{...r.original}}))})");
+  finishLyric({ok:true,text:async()=>JSON.stringify({status:'found',searched:true,lyrics:'Found line one\nFound line two',lyrics_id:'verified-id'})});await pendingLyric;
+  assert.equal(lyricUI.$('changeLyrics').textContent,'검색 안 함');
+  lyricUI.run('selectFile(0)');assert.equal(lyricUI.$('changeLyrics').textContent,'Found line one\nFound line two');
+  assert.equal(lyricUI.run('saveItem(editingResult).lyrics_id'),'verified-id');
+  lyricUI.$('onlyEmpty').checked=true;assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),false);
+  lyricUI.$('onlyEmpty').checked=false;assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),true);
+  const beforeLyricCheck=lyricUI.run('draftSignature(editingResult)');lyricUI.$('saveLyrics').checked=false;lyricUI.$('saveLyrics').listeners.change();
+  assert.equal(lyricUI.run('draftSignature(editingResult)'),beforeLyricCheck);assert.equal(lyricUI.run('saveItem(editingResult).lyrics_id'),null);assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),false);
+  lyricUI.run('selectFile(1);selectFile(0)');assert.equal(lyricUI.$('saveLyrics').checked,false);
+  lyricUI.$('saveLyrics').checked=true;lyricUI.run('toggleTagPreview()');assert.equal(lyricUI.$('currentLyrics').textContent,'Found line one\nFound line two');assert.ok(lyricUI.$('currentLyrics').className.includes('lyrics-preview'));
+  lyricUI.run('toggleTagPreview()');assert.equal(lyricUI.$('currentLyrics').textContent,'Stored line one\nStored line two');
+  assert.equal(lyricUI.calls.filter(c=>c.url.startsWith('/api/lyrics/')).length,1);
+  lyricUI.context.fetch=lyricFetch;lyricUI.context.lyricResponse={status:'not_found',searched:true,lyrics:'',lyrics_id:'none-id'};
+  await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),false);
+  lyricUI.context.fetch=async()=>{throw new Error('offline');};await lyricUI.run('searchLyricsForCurrent()');assert.ok(lyricUI.$('changeLyrics').textContent.includes('검색 오류'));assert.notEqual(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');
+  assert.ok(html.includes('.file-lyrics+.file-name-text{margin-left:6px}'));assert.ok(html.includes('height:210px'));assert.ok(!html.includes('<textarea id="currentLyrics"'));
 
   const hover=harness(),hoverImages=[];
   const create=hover.context.document.createElement;

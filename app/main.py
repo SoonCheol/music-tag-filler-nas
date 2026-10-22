@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 import mutagen
 from functools import wraps
 from collections import OrderedDict
+from concurrent.futures import Future
 import io
 from . import storage, search_service, job_service, preferences
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
@@ -366,6 +367,7 @@ class SaveItem(BaseModel):
     include_cover: bool = False
     cover_id: Optional[str] = None
     include_ids: bool = False
+    lyrics_id: Optional[str] = None
 
 
 class SaveRequest(BaseModel):
@@ -375,11 +377,95 @@ class SaveRequest(BaseModel):
     checked_paths: List[str] = Field(default_factory=list)
     items: List[SaveItem]
     save_cover: bool = True
+    save_lyrics: bool = True
     only_empty: bool = True
     fill_lyrics: bool = False
     rename: bool = False
     cover_max_px: Optional[int] = Field(default=None, ge=100, le=1000)
     artist_name_preference: Literal["original", "latin"] = "original"
+
+
+class LyricsSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    title: str = Field(max_length=4096)
+    artist: str = Field(max_length=4096)
+
+
+_lyrics_cache = OrderedDict()
+_lyrics_pending = {}
+_lyrics_lock = threading.Lock()
+
+
+def lyric_response(entry):
+    return {key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "message")}
+
+
+def remember_lyrics(key, found, searched=True):
+    text = original_lyrics.clean_text(found.text) if found.status == original_lyrics.FOUND else ""
+    status = "found" if text else "not_found" if found.status in (original_lyrics.FOUND, original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error"
+    messages = {original_lyrics.BUSY: "가사 서버에 연결할 수 없습니다. 다시 시도해 주세요.",
+                original_lyrics.CONFLICT: "검색된 가사가 서로 일치하지 않아 사용할 수 없습니다.",
+                original_lyrics.NEED_TAGS: "가사 검색에 제목과 가수가 필요합니다."}
+    entry = {"key": key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
+             "lyrics": text, "message": messages.get(found.status, "가사 검색 오류가 발생했습니다.") if status == "error" else "",
+             "expires": time.monotonic() + (3600 if status == "found" else 30 if status == "not_found" else 5)}
+    with _lyrics_lock:
+        _lyrics_cache[key] = entry
+        _lyrics_cache.move_to_end(key)
+        while len(_lyrics_cache) > 64:
+            _lyrics_cache.popitem(last=False)
+    return entry
+
+
+@app.post("/api/jobs/{job_id}/lyrics-search")
+def search_file_lyrics(job_id: str, request: LyricsSearchRequest):
+    with storage.OPERATION_LOCK:
+        job = jobs.get(job_id)
+        row = next((r for r in (job or {}).get("results", []) if r["path"] == request.path), None)
+        if row is None:
+            raise HTTPException(404, "이 작업의 파일이 아닙니다")
+        try:
+            target = storage.resolve_music(MUSIC_ROOT, request.path)
+            if storage.revision(target) != request.expected_revision:
+                raise HTTPException(409, "파일이 변경되었습니다. 다시 확인하세요")
+        except (storage.StorageError, OSError) as exc:
+            raise HTTPException(400, str(exc))
+        duration = row.get("original", {}).get("duration", 0)
+    key = (str(MUSIC_ROOT.resolve()), job_id, request.path, request.expected_revision, request.title, request.artist)
+    with _lyrics_lock:
+        entry = _lyrics_cache.get(key)
+        if entry and entry["expires"] > time.monotonic():
+            return lyric_response(entry)
+        pending = _lyrics_pending.get(key)
+        owner = pending is None
+        if owner:
+            pending = Future()
+            _lyrics_pending[key] = pending
+    if not owner:
+        return lyric_response(pending.result())
+    try:
+        searched = bool(request.title.strip() and request.artist.strip())
+        found = original_lyrics.find(request.title, request.artist, duration) if searched else original_lyrics.LyricsResult(original_lyrics.NEED_TAGS)
+        entry = remember_lyrics(key, found, searched)
+        pending.set_result(entry)
+        return lyric_response(entry)
+    except Exception:
+        entry = remember_lyrics(key, original_lyrics.LyricsResult(original_lyrics.BUSY))
+        pending.set_result(entry)
+        return lyric_response(entry)
+    finally:
+        with _lyrics_lock:
+            _lyrics_pending.pop(key, None)
+
+
+def selected_lyrics(job_id, path, revision, lyrics_id, title, artist):
+    with _lyrics_lock:
+        entry = next((value for value in _lyrics_cache.values() if value["lyrics_id"] == lyrics_id), None)
+        if not entry or entry["expires"] <= time.monotonic() or entry["key"] != (str(MUSIC_ROOT.resolve()), job_id, path, revision, title, artist):
+            raise storage.StorageError("가사 검색 결과가 만료되었거나 태그가 변경되었습니다. 다시 검색하세요")
+        return entry
 
 
 class RevertRequest(BaseModel):
@@ -528,7 +614,7 @@ def save_one(result, item, request, lyric_context=None):
     if storage.revision(path) != item.expected_revision:
         raise storage.StorageError("확인 이후 파일이 변경되었습니다. 다시 스캔하세요")
     if item.selection == "none":
-        if not item.cover_id and not request.rename:
+        if not item.cover_id and not request.rename and not (request.save_lyrics and item.lyrics_id):
             return {"path": item.path, "status": "skipped", "reason": "no_selection"}
         # Explicit cover/rename-only operation must not import unchecked text or IDs.
         item = item.model_copy(update={"fields": [], "values": {}, "include_ids": False, "include_cover": False})
@@ -584,8 +670,12 @@ def save_one(result, item, request, lyric_context=None):
     if uploaded is not None:
         wants_cover = not (only_empty and current.cover is not None)
     has_real_lyrics = bool(current.lyrics.strip() and not original_lyrics.marker_only(current.lyrics))
-    wants_lyrics = bool(item.selection != "none" and request.fill_lyrics and not has_real_lyrics and final["title"] and final["artist"])
-    if needs_text or wants_cover or wants_lyrics or request.rename or (ids and not ids.is_empty()):
+    choice = selected_lyrics(result.get("job_id", ""), item.path, item.expected_revision, item.lyrics_id, final["title"], final["artist"]) if request.save_lyrics and item.lyrics_id else None
+    # New UI sends an explicit checkbox: only previously searched lyrics may save.
+    # Old API clients without that control retain their automatic missing-lyrics option.
+    wants_lyrics = bool("save_lyrics" not in request.model_fields_set and request.save_lyrics and item.selection != "none" and request.fill_lyrics and not choice and not has_real_lyrics and final["title"] and final["artist"])
+    manual_lyrics = choice["lyrics"] if choice and choice["status"] == "found" and not (only_empty and has_real_lyrics) else None
+    if needs_text or wants_cover or wants_lyrics or manual_lyrics or request.rename or (ids and not ids.is_empty()):
         storage.writable(path)  # fail before network lookups or backup creation on /music:ro
     cover = None
     asset_errors = []
@@ -596,11 +686,12 @@ def save_one(result, item, request, lyric_context=None):
             cover, asset_errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country)
         # Normalize missing/empty downloads before reaching the transactional writer.
         cover = storage.prepare_cover_change(cover, current.cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
-    lyrics = None
-    lyrics_status = "preserved" if has_real_lyrics else "skipped"
+    lyrics = manual_lyrics
+    lyrics_status = choice["status"] if choice else "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:
         context = lyric_context if lyric_context is not None else {"busy_streak": 0}
-        if context["busy_streak"] >= 5:
+        actually_searched = context["busy_streak"] < 5
+        if not actually_searched:
             found = original_lyrics.LyricsResult(original_lyrics.BUSY)
         else:
             found = original_lyrics.find(final["title"], final["artist"], current.length)
@@ -610,8 +701,11 @@ def save_one(result, item, request, lyric_context=None):
         lyrics_status = found.status
         if found.status == original_lyrics.FOUND:
             lyrics = found.text
+        choice = remember_lyrics((str(MUSIC_ROOT.resolve()), result.get("job_id", ""), item.path, item.expected_revision, final["title"], final["artist"]), found, actually_searched)
     outcome = storage.save(path, MUSIC_ROOT.resolve(), BACKUP_ROOT, values, item.fields,
-                           only_empty, item.expected_revision, cover, lyrics, request.rename, ids)
+                           only_empty, item.expected_revision, cover, lyrics, request.rename, ids, replace_lyrics=bool(manual_lyrics))
+    if choice:
+        outcome["lyrics_search"] = lyric_response(choice)
     outcome["lyrics_status"] = lyrics_status
     outcome["asset_errors"] = asset_errors
     if asset_errors:
@@ -718,7 +812,7 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                     result["stored_saved"] = True
                 result["file_state"] = file_state(result)
                 outcome["file_state"] = result["file_state"]
-                result["last_save"] = {k: v for k, v in outcome.items() if k != "original"}
+                result["last_save"] = {k: v for k, v in outcome.items() if k not in ("original", "lyrics_search")}
             except Exception as exc:
                 outcome = {"path": relative, "status": "failed", "message": str(exc)}
                 result["last_save"] = outcome
@@ -854,10 +948,13 @@ def file_thumbnail(path: str, request: Request, v: Optional[str] = None):
 
 
 @app.get("/api/lyrics/{path:path}")
-def file_lyrics(path: str):
-    # Existing lyric viewer fetches content only on an explicit click, never per row.
+def file_lyrics(path: str, v: Optional[str] = None):
+    # Read the selected song only; never populate list data with lyric bodies.
     try:
-        info = original_tags.read_file(str(storage.resolve_music(MUSIC_ROOT, path)))
+        target = storage.resolve_music(MUSIC_ROOT, path)
+        if v and storage.revision(target) != v:
+            raise HTTPException(409, "파일이 변경되었습니다. 다시 확인하세요")
+        info = original_tags.read_file(str(target))
         return {"lyrics": info.lyrics}
     except (storage.StorageError, OSError) as exc:
         raise HTTPException(400, str(exc))
