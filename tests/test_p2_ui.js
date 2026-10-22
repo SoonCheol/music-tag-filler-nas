@@ -171,7 +171,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   thumbnails.run("paintCandidateCover(document.getElementById('changeCover'),thumbRow.candidates[0],thumbRow)");await Promise.resolve();
   assert.ok(thumbnails.$('changeCover').innerHTML.includes('/cover/thumb-0?'));
   assert.equal(thumbImages.filter(img=>img.onload).length,downloads);
-  assert.ok(html.includes('width:32px;height:32px;object-fit:cover'));
+  assert.ok(html.includes('width:24px;height:24px;object-fit:cover'));
   assert.ok(html.includes('.cand-table{max-height:260px;overflow:auto;'));
   const failedThumb=harness(),failedImages=[];
   const failedCreate=failedThumb.context.document.createElement;
