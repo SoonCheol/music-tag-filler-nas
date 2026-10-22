@@ -13,7 +13,7 @@ from functools import wraps
 from collections import OrderedDict
 from concurrent.futures import Future
 import io
-from . import storage, search_service, job_service, preferences
+from . import storage, search_service, job_service, preferences, rename_service
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
 MUSIC_ROOT = Path(os.getenv("MUSIC_ROOT", "/music"))
@@ -170,6 +170,26 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             except OSError:
                 job["state_error"] = "작업 기록 실패. 기존 디스크 기록은 보존했습니다"
 
+def path_operation(label):
+    """Register before releasing the mutation lock, including queued save calls."""
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            with storage.OPERATION_LOCK:
+                try:
+                    rename_service.check_ready(DATA_ROOT)
+                except storage.StorageError as exc:
+                    raise HTTPException(409, str(exc))
+                rename_service.active[label] = rename_service.active.get(label, 0) + 1
+            try:
+                return function(*args, **kwargs)
+            finally:
+                with storage.OPERATION_LOCK:
+                    rename_service.active[label] -= 1
+        return wrapped
+    return decorate
+
+
 class ScanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sub_path: str = ""
@@ -193,6 +213,11 @@ def job_locked(function):
     @wraps(function)
     def wrapped(*args, **kwargs):
         with storage.OPERATION_LOCK:
+            if function.__name__ in ("start_scan", "resume_job"):
+                try:
+                    rename_service.check_ready(DATA_ROOT)
+                except storage.StorageError as exc:
+                    raise HTTPException(409, str(exc))
             return function(*args, **kwargs)
     return wrapped
 
@@ -420,6 +445,7 @@ def remember_lyrics(key, found, searched=True):
 
 
 @app.post("/api/jobs/{job_id}/lyrics-search")
+@path_operation("가사 검색")
 def search_file_lyrics(job_id: str, request: LyricsSearchRequest):
     with storage.OPERATION_LOCK:
         job = jobs.get(job_id)
@@ -540,6 +566,7 @@ def uploaded_cover(job_id: str, cover_id: str):
 
 
 @app.post("/api/jobs/{job_id}/search")
+@path_operation("태그 검색")
 def research_file(job_id: str, request: SearchRequest):
     with storage.OPERATION_LOCK:
         if job_id not in jobs:
@@ -575,6 +602,7 @@ def research_file(job_id: str, request: SearchRequest):
 
 
 @app.get("/api/jobs/{job_id}/cover/{selection_id}")
+@path_operation("후보 커버 조회")
 def candidate_cover(job_id: str, selection_id: str, path: str):
     if job_id not in jobs:
         raise HTTPException(404, "job not found")
@@ -753,6 +781,12 @@ def delete_save_task(task_id: str):
 def save_job(job_id: str, request: SaveRequest):
     task_id = str(uuid.uuid4())
     with save_tasks_lock:
+        try:
+            rename_service.check_ready(DATA_ROOT)
+        except storage.StorageError as exc:
+            raise HTTPException(409, str(exc))
+        if rename_service.renaming:
+            raise HTTPException(409, "파일명 변경 중입니다. 완료 후 다시 시도하세요")
         save_tasks[task_id] = {"id": task_id, "job_id": job_id, "status": "queued",
                                "sub_path": jobs.get(job_id, {}).get("sub_path", ""),
                                "created_at": time.time(), "total": len(request.paths),
@@ -896,6 +930,7 @@ def stream_audio(path: str, request: Request):
 
 
 @app.get("/api/files/{path:path}")
+@path_operation("파일 정보")
 def file_info(path: str):
     try:
         return storage.describe(storage.resolve_music(MUSIC_ROOT, path))
@@ -910,6 +945,7 @@ _THUMBNAIL_LIMIT = 256
 
 
 @app.get("/api/thumbnail/{path:path}")
+@path_operation("썸네일 조회")
 def file_thumbnail(path: str, request: Request, v: Optional[str] = None):
     try:
         target = storage.resolve_music(MUSIC_ROOT, path)
@@ -948,6 +984,7 @@ def file_thumbnail(path: str, request: Request, v: Optional[str] = None):
 
 
 @app.get("/api/lyrics/{path:path}")
+@path_operation("가사 읽기")
 def file_lyrics(path: str, v: Optional[str] = None):
     # Read the selected song only; never populate list data with lyric bodies.
     try:
@@ -961,6 +998,7 @@ def file_lyrics(path: str, v: Optional[str] = None):
 
 
 @app.get("/api/cover/{path:path}")
+@path_operation("커버 읽기")
 def file_cover(path: str):
     try:
         info = original_tags.read_file(str(storage.resolve_music(MUSIC_ROOT, path)))
@@ -972,6 +1010,7 @@ def file_cover(path: str):
 
 
 @app.post("/api/revert/{path:path}")
+@path_operation("원본 복원")
 def revert_file(path: str, request: RevertRequest):
     with storage.OPERATION_LOCK:
         try:
@@ -997,3 +1036,84 @@ def root():
     return FileResponse(str(Path(__file__).parent / "static" / "index.html"))
 
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+
+class RenameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    stem: str = Field(max_length=255)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def rekey_lyrics(event):
+    remaps = []
+    with _lyrics_lock:
+        for key, entry in list(_lyrics_cache.items()):
+            if key[0] == str(MUSIC_ROOT.resolve()) and key[2] == event["old_path"]:
+                _lyrics_cache.pop(key)
+                if key[3] != event["revision"]:
+                    continue
+                new_key = (*key[:2], event["new_path"], *key[3:])
+                old_id = entry["lyrics_id"]
+                entry = {**entry, "key": new_key, "lyrics_id": uuid.uuid4().hex}
+                _lyrics_cache[new_key] = entry
+                remaps.append({"job_id": key[1], "old_id": old_id, "new_id": entry["lyrics_id"]})
+    return remaps
+
+
+_rename_tokens = {}
+
+
+def public_rename(event):
+    return {**{key: event[key] for key in ("seq", "old_path", "new_path", "revision")},
+            "lyrics_tokens": _rename_tokens.get(event["id"], [])}
+
+
+@app.get("/api/path-changes")
+@job_locked
+def path_changes(after: int = 0):
+    try:
+        events = rename_service.changes(DATA_ROOT, after)
+        return {"changes": [public_rename(e) for e in events]}
+    except (storage.StorageError, OSError, ValueError) as exc:
+        raise HTTPException(503, str(exc))
+
+
+@app.post("/api/jobs/{job_id}/rename")
+def rename_file(job_id: str, request: RenameRequest):
+    if not storage.OPERATION_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "다른 파일 작업이 진행 중입니다. 완료 후 다시 시도하세요")
+    try:
+        if get_active_job():
+            raise HTTPException(409, "대기 또는 진행 중인 스캔 작업이 있습니다")
+        busy = [label for label, count in rename_service.active.items() if count]
+        with save_tasks_lock:
+            if any(t["status"] in ("queued", "saving") for t in save_tasks.values()):
+                busy.append("대기/진행 중인 태그 저장")
+            if busy:
+                raise HTTPException(409, "진행 중인 작업: " + ", ".join(busy))
+            rename_service.renaming = True
+        event = rename_service.rename(MUSIC_ROOT.resolve(), DATA_ROOT, BACKUP_ROOT, jobs, save_jobs,
+                                      job_id, request.path, request.stem, request.expected_revision)
+        if event["status"] == "unchanged":
+            return event
+        _rename_tokens[event["id"]] = rekey_lyrics(event)
+        with _thumbnail_lock:
+            _thumbnail_cache.pop(str(MUSIC_ROOT / request.path), None)
+        return {"status": "renamed", "change": public_rename(event)}
+    except (storage.StorageError, OSError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
+    finally:
+        with save_tasks_lock:
+            rename_service.renaming = False
+        storage.OPERATION_LOCK.release()
+
+
+@app.on_event("startup")
+def recover_filename_changes():
+    with storage.OPERATION_LOCK:
+        try:
+            rename_service.recover(MUSIC_ROOT.resolve(), DATA_ROOT, BACKUP_ROOT, jobs, save_jobs)
+        except storage.StorageError:
+            # Reads remain available; path-changing operations fail closed until repaired.
+            pass

@@ -85,6 +85,7 @@ tr.selected{background:var(--blue-light) !important}
 .job-title{min-width:0;overflow-wrap:anywhere}.job .badge{flex-shrink:0}
 .file-name-cell{padding-top:3px;padding-bottom:3px}
 .file-name-content{display:flex;align-items:center;gap:4px;min-width:0}
+.filename-editor{flex:1;min-width:0;width:100%;height:24px;padding:2px 4px}
 .file-name-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .audio-preview-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:#f8f9fa;color:#374151;font-size:12px;cursor:pointer}
 .audio-preview-button:hover:not(:disabled){background:#e8f0fe;border-color:#9cb9ed}
@@ -263,6 +264,7 @@ tr.selected{background:var(--blue-light) !important}
 
 <script>
 let currentJobId=null,allJobs=[],currentResults=[],filteredResults=[],selectedFileIdx=-1;
+let renameEditor=null,renameBusy=false,pathChangeCursor=0;
 let editingResult=null,displayedJobId=null,saving=false,searching=false,lastJobSignature='';
 const tagFields=['title','artist','album','albumartist','track','year','genre'];
 let commonTagFields=[...tagFields];
@@ -426,6 +428,7 @@ async function pollSaveTasks(){await refreshSaveTasks();setTimeout(pollSaveTasks
 async function deleteSaveTask(id){if(!confirm('저장 작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/save-tasks/'+id,{method:'DELETE'});refreshSaveTasks();}catch(e){alert(e.message)}}
 async function pollJobs(){
   try{
+    if(!renameBusy)await pollPathChanges();
     const jobs=await api('/api/jobs'); allJobs=jobs;
     const box=$('jobs');
     if(!jobs.length){box.innerHTML='<div style="text-align:center;color:#999;padding:8px">작업 없음</div>'}else{
@@ -450,14 +453,14 @@ async function pollJobs(){
       });
     }
     let active=jobs.find(j=>j.id===currentJobId&&(!viewPinned||(j.sub_path||'')===$('subPath').value))||(viewPinned?jobs.find(j=>(j.sub_path||'')===$('subPath').value):jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0]);
-    if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=`${active.scanned}/${active.total||'?'} (${pct}%) ${active.status}`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnResume').style.display='inline-block';}else{ $('btnResume').style.display='none';}if(!saving&&!searching&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
+    if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=`${active.scanned}/${active.total||'?'} (${pct}%) ${active.status}`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnResume').style.display='inline-block';}else{ $('btnResume').style.display='none';}if(!saving&&!searching&&!renameEditor&&!renameBusy&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
   }catch(e){}
   setTimeout(pollJobs, allJobs.some(j=>j.status==='scanning'||j.status==='queued')?1500:3000);
 }
 async function cancelSpecific(id){ if(!confirm('이 작업을 중지할까요?')) return; try{await api('/api/jobs/'+id+'/cancel',{method:'POST'});pollJobs();}catch(e){alert(e.message)} }
 async function deleteSpecific(id){if(!confirm('작업 기록만 삭제할까요? 음악과 백업은 유지됩니다.'))return;try{await api('/api/jobs/'+id,{method:'DELETE'});if(currentJobId===id){currentJobId=null;displayedJobId=null;currentResults=[];editingResult=null;applyFilter();}pollJobs();}catch(e){alert(e.message);}}
 async function resumeSpecific(id){currentJobId=id;await resumeScan();}
-async function loadJob(id){if(saving||actionResolver)return;if(id!==currentJobId&&!await allowDraftMove())return;const job=await api('/api/jobs/'+id);adoptJob(job);}
+async function loadJob(id){if(saving||renameBusy||renameEditor||actionResolver)return;await pollPathChanges();if(id!==currentJobId&&!await allowDraftMove())return;const job=await api('/api/jobs/'+id);adoptJob(job);}
 let fileSortColumn=null,fileSortDirection=1;
 const fileNameCompare=(a,b)=>a.path.split('/').pop().localeCompare(b.path.split('/').pop(),'ko',{numeric:true,sensitivity:'base'})||a.path.localeCompare(b.path,'ko',{numeric:true});
 function sortFiles(column){
@@ -478,7 +481,7 @@ function sortFileDisplay(){
 }
 function applyFilter(){
   captureCurrent();const selectedPath=editingResult?.path;
-  const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>!q||r.path.toLowerCase().includes(q)).sort((a,b)=>(a._displayOrder??0)-(b._displayOrder??0));
+  const q=$('fileFilter').value.toLowerCase();filteredResults=currentResults.filter(r=>r._renameVisible||!q||r.path.toLowerCase().includes(q)).sort((a,b)=>(a._displayOrder??0)-(b._displayOrder??0));
   $('fileCount').textContent=filteredResults.length;selectedFileIdx=filteredResults.findIndex(r=>r.path===selectedPath);
   if(selectedFileIdx<0){editingResult=null;if(filteredResults.length)selectedFileIdx=0;}
   renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);
@@ -500,6 +503,67 @@ async function requestSelectFile(idx){
 const previewAudio=$('previewAudio');
 let playingPath=null,audioPlaying=false,audioRequest=0;
 const audioUnavailable=new Set();
+
+function stopRenamedAudio(path){
+  if(playingPath!==path)return;
+  ++audioRequest;previewAudio.pause();previewAudio.removeAttribute('src');previewAudio.load();
+  playingPath=null;audioPlaying=false;audioUnavailable.delete(path);updateAudioButtons();
+}
+function applyPathChange(change){
+  captureCurrent();const old=change.old_path,next=change.new_path,scroll=$('fileListScroller').scrollTop;
+  stopRenamedAudio(old);
+  if(renameEditor?.path===old&&!renameBusy)cancelFilenameEdit();
+  const visible=filteredResults.some(r=>r.path===old);
+  const groups=[currentResults,...draftJobs.values(),...allJobs.map(j=>j.results||[])];
+  groups.forEach(rows=>rows.forEach(r=>{
+    if(r.path!==old||r.original?.revision!==change.revision)return;
+    r.path=next;if(visible&&currentResults.includes(r))r._renameVisible=true;
+    const token=r._lyricsSearch?.lyrics_id,remap=(change.lyrics_tokens||[]).find(t=>t.old_id===token);
+    if(remap)r._lyricsSearch.lyrics_id=remap.new_id;
+    else if(token)r._lyricsSearch.lyrics_id=null;
+  }));
+  if(previewPath===old)previewPath=next;
+  if(restoredView?.selectedPath===old)restoredView.selectedPath=next;
+  const saved=readView();if(saved?.selectedPath===old){saved.selectedPath=next;try{localStorage.setItem('musicFolderView',JSON.stringify(saved));}catch(e){}}
+  const node=fileRowNodes.get(old);if(node){fileRowNodes.delete(old);delete node._filePaint;fileRowNodes.set(next,node);}
+  const lyricKey=JSON.stringify([old,change.revision]),cached=storedLyricsCache.get(lyricKey);
+  if(cached){storedLyricsCache.delete(lyricKey);storedLyricsCache.set(JSON.stringify([next,change.revision]),cached);}
+  hideHoverCover();candidateCoverCache.clear();
+  if(!renameEditor){applyFilter();if(selectedFileIdx>=0)selectFile(selectedFileIdx);}
+  $('fileListScroller').scrollTop=scroll;persistView();
+}
+async function pollPathChanges(){
+  const response=await api('/api/path-changes?after='+pathChangeCursor);
+  for(const change of response.changes||[]){applyPathChange(change);pathChangeCursor=Math.max(pathChangeCursor,change.seq);}
+}
+function cancelFilenameEdit(){
+  if(renameBusy||!renameEditor)return;
+  renameEditor=null;const scroll=$('fileListScroller').scrollTop;
+  fileRowNodes.forEach(node=>delete node._filePaint);renderFileList();$('fileListScroller').scrollTop=scroll;
+}
+function beginFilenameEdit(index){
+  if(renameBusy||renameEditor||saving||searching||actionResolver)return;
+  const r=filteredResults[index];if(!r)return;
+  captureCurrent();const node=fileRowNodes.get(r.path),span=node?.querySelector('.file-name-text');if(!span)return;
+  const name=r.path.split('/').pop(),dot=name.lastIndexOf('.'),input=document.createElement('input');
+  input.className='input filename-editor';input.value=name.slice(0,dot);input.setAttribute('aria-label','새 파일명 (확장자 제외)');
+  renameEditor={r,path:r.path,jobId:currentJobId,stem:input.value,input};
+  input.onclick=e=>e.stopPropagation();input.ondblclick=e=>e.stopPropagation();
+  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();e.stopPropagation();submitFilenameEdit();}else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancelFilenameEdit();}};
+  input.onblur=()=>{if(!renameBusy)cancelFilenameEdit();};span.replaceWith(input);input.focus();input.select();
+}
+async function submitFilenameEdit(){
+  const edit=renameEditor;if(!edit||renameBusy)return;
+  const stem=edit.input.value;if(stem===edit.stem){cancelFilenameEdit();return;}
+  renameBusy=true;edit.input.disabled=true;stopRenamedAudio(edit.path);
+  try{
+    const result=await api('/api/jobs/'+encodeURIComponent(edit.jobId)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:edit.path,stem,expected_revision:edit.r.original.revision})});
+    renameEditor=null;if(result.change)applyPathChange(result.change);else renderFileList();
+    $('statusLine').textContent='파일명 변경 완료';
+  }catch(error){renameEditor=null;fileRowNodes.forEach(node=>delete node._filePaint);renderFileList();$('statusLine').textContent='파일명 변경 실패: '+error.message;alert('파일명 변경 실패: '+error.message);}
+  finally{renameBusy=false;}
+}
+
 function audioMime(path){return {mp3:'audio/mpeg',flac:'audio/flac',m4a:'audio/mp4',ogg:'audio/ogg'}[(path.split('.').pop()||'').toLowerCase()]||'';}
 function canPreviewAudio(path){const mime=audioMime(path);return !!mime&&typeof previewAudio.canPlayType==='function'&&!!previewAudio.canPlayType(mime)&&!audioUnavailable.has(path);}
 function audioButton(path,index){
@@ -558,7 +622,7 @@ function renderFileList(){
     const key=r.path,tr=fileRowNodes.get(key)||document.createElement('tr');
     const paint=JSON.stringify([i,state,!!r._checked,r.original?.revision,!!r.original?.has_cover,!!r.original?.has_lyrics]);
     if(tr._filePaint!==paint){
-      tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td class="file-name-cell" title="${esc(r.path)}"><div class="file-name-content">${audioButton(r.path,i)}${fileMediaIcons(r)}<span class="file-name-text">${esc(r.path.split('/').pop())}</span></div></td><td><span class="file-state file-state-${state}">${status}</span></td>`;
+      tr.innerHTML=`<td><input type="checkbox" ${r._checked?'checked':''} ${state==='auto'?'':'disabled'} aria-label="${esc(r.path)} 선택" onclick="event.stopPropagation();toggleCheck(${i})"></td><td>${i+1}</td><td class="file-name-cell" title="${esc(r.path)}"><div class="file-name-content">${audioButton(r.path,i)}${fileMediaIcons(r)}<span class="file-name-text" title="더블클릭하여 파일명 변경" ondblclick="event.stopPropagation();beginFilenameEdit(${i})">${esc(r.path.split('/').pop())}</span></div></td><td><span class="file-state file-state-${state}">${status}</span></td>`;
       tr._filePaint=paint;tr.onclick=()=>requestSelectFile(i);
     }
     tr.className=i===selectedFileIdx?'selected':'';nodes.push(tr);next.set(key,tr);
@@ -955,7 +1019,7 @@ async function manualSearch(){
 $('searchQ').title='국가 지정: @JP 가수 - 제목 (@KR/@US 등). 음향 검색: @sound 또는 @JP @sound';
 $('searchQ').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualSearch();}});
 let confirmedFilter=$('fileFilter').value;
-$('fileFilter').addEventListener('input',async()=>{const q=$('fileFilter').value;if(editingResult&&!editingResult.path.toLowerCase().includes(q.toLowerCase())&&!await allowDraftMove()){$('fileFilter').value=confirmedFilter;return;}confirmedFilter=q;applyFilter();persistView();});
+$('fileFilter').addEventListener('input',async()=>{const q=$('fileFilter').value;if(editingResult&&!editingResult.path.toLowerCase().includes(q.toLowerCase())&&!await allowDraftMove()){$('fileFilter').value=confirmedFilter;return;}confirmedFilter=q;currentResults.forEach(r=>delete r._renameVisible);applyFilter();persistView();});
 function preferenceValues(){return {country:$('searchCountry').value,recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,include_ids:$('includeIds').checked,artist_name_preference:$('artistPreference').value,cover_max_px:Number($('coverMax').value)};}
 async function loadPreferences(){try{const p=await api('/api/preferences');$('searchCountry').value=p.country;$('recurse').checked=p.recurse;$('onlyEmpty').checked=p.only_empty;$('fillLyrics').checked=p.fill_lyrics;$('renameFiles').checked=p.rename;$('includeIds').checked=p.include_ids;$('artistPreference').value=p.artist_name_preference;$('coverMax').value=p.cover_max_px;}catch(e){$('statusLine').textContent='설정 읽기 실패: '+e.message;}finally{$('btnOptions').disabled=false;updateSavePreview();}}
 const modalOptionIds=['onlyEmpty','fillLyrics','renameFiles','includeIds','searchCountry','artistPreference','coverMax','scanPaths'];

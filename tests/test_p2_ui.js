@@ -10,7 +10,7 @@ function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
   function element() {return {value:'',checked:false,hidden:true,style:{},children:[],listeners:{},attributes:{},scrollTop:0,
     showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return this.valid!==false;},
-    innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},focus(){},
+    innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];if(k==='src')this.src='';},focus(){},
     appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(...children){this.children.forEach(c=>c.parent=null);this.children=[];children.forEach(c=>this.appendChild(c));},
     addEventListener(name,fn){this.listeners[name]=fn;},contains(target){return target===this||this.children.some(c=>c.contains(target));}};}
   function $(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
@@ -22,6 +22,8 @@ function harness() {
       let value=[];
       if(url.startsWith('/api/lyrics/'))value={lyrics:context.storedLyricText||''};
       else if(url.endsWith('/lyrics-search'))value=context.lyricResponse||{status:'not_found',searched:true,lyrics:'',lyrics_id:'no-result'};
+      else if(url.startsWith('/api/path-changes'))value=context.pathChanges||{changes:[]};
+      else if(url.endsWith('/rename'))value=context.renameResponse||{};
       else if(url==='/api/jobs')value=context.jobsResponse||[];
       else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
       else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
@@ -196,6 +198,17 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(html.includes('#fileListScroller{height:517px;min-height:517px;max-height:517px;overflow-y:auto}'));
   assert.ok(html.includes('#fileColumn thead tr{height:37px}#fileBody tr{height:calc(480px / 13)}'));
   assert.match(html,/<label><input type="checkbox" class="chg-check" data-field="album" checked><\/label><div>앨범 :<\/div><input id="chg_album"/);
+  const renamed=harness();
+  renamed.run("currentJobId='rename';adoptJob({id:'rename',results:[{path:'before.mp3',file_state:'auto',scan_auto_selected:true,original:{revision:'a'.repeat(64),title:'Original'},candidates:[]}]});currentResults[0]._checked=true;currentResults[0]._displayOrder=7;$('chg_title').value='Unsaved draft';captureCurrent();currentResults[0]._dirty=true;playingPath='before.mp3';audioPlaying=true");
+  renamed.$('previewAudio').src='/api/audio/before.mp3';renamed.$('fileListScroller').scrollTop=123;
+  renamed.run("applyPathChange({seq:1,old_path:'before.mp3',new_path:'after.mp3',revision:'a'.repeat(64),lyrics_tokens:[]})");
+  assert.equal(renamed.run('playingPath'),null);assert.equal(renamed.$('previewAudio').src,'');
+  assert.equal(renamed.run('editingResult.path'),'after.mp3');assert.equal(renamed.run('editingResult._draft.title'),'Unsaved draft');
+  assert.equal(renamed.run('editingResult._checked'),true);assert.equal(renamed.run('editingResult._displayOrder'),7);assert.equal(renamed.run('editingResult.file_state'),'auto');
+  assert.equal(renamed.$('fileListScroller').scrollTop,123);
+  renamed.run("playingPath='other.mp3';audioPlaying=true;stopRenamedAudio('after.mp3')");assert.equal(renamed.run('playingPath'),'other.mp3');
+  const callsBefore=renamed.calls.length;
+  renamed.run("renameEditor={stem:'same',input:{value:'same'}}");await renamed.run('submitFilenameEdit()');assert.equal(renamed.calls.length,callsBefore);assert.equal(renamed.run('renameEditor'),null);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
   pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});
   pathTip.run("pendingFolder='DANCE/Fitness Latino Path Full';folderLabel()");pathTip.$('folderToggle').listeners.mouseenter();

@@ -103,3 +103,6 @@ P0 되돌리기는 검증된 최초 원본 전체 바이트를 복원하지만 �
 명령 근거: [Docker cp](https://docs.docker.com/reference/cli/docker/container/cp/),
 [이미지 저장](https://docs.docker.com/reference/cli/docker/image/save/),
 [이미지 복원](https://docs.docker.com/reference/cli/docker/image/load/).
+
+
+직접 파일명 변경을 사용한 경우 data의 renames 기록도 jobs.json·backups와 함께 보존합니다. [파일명 변경 복구](FILENAME_RENAME.md)를 참고하세요.
