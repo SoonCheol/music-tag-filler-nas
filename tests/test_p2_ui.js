@@ -15,7 +15,7 @@ function harness() {
     addEventListener(name,fn){this.listeners[name]=fn;},contains(target){return target===this||this.children.some(c=>c.contains(target));}};}
   function $(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
   for(const field of ['title','artist','album','albumartist','track','year','genre']){const check=element();check.checked=true;check.dataset={field};checks.push(check);}
-  const context=vm.createContext({console,Set,Map,Number,AbortController,URL,clearTimeout,encodeURIComponent,localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)},
+  const context=vm.createContext({console,Set,Map,Number,AbortController,URL,clearTimeout,performance:{now:()=>0},requestAnimationFrame:fn=>fn(),encodeURIComponent,localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)},
     document:{getElementById:$,createElement:element,addEventListener:(k,f)=>documentEvents[k]=f,querySelectorAll:s=>s==='.chg-check'?checks:[]},
     alert(){},confirm:()=>true,setTimeout(){},fetch:async(url,options={})=>{let body=options.body;
       if(typeof body==='string')body=JSON.parse(body);calls.push({url,body,method:options.method});
@@ -492,5 +492,18 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const saveButtons=html.slice(html.indexOf('onclick="toggleTagPreview()"'),html.indexOf('id="lyricStatus"'));
   const buttonOrder=['toggleTagPreview()','saveCurrent()','saveAll()','resetChange()','openSaveOptions()'].map(fn=>saveButtons.indexOf(fn));
   assert(buttonOrder.every((index,i)=>index>=0&&(!i||index>buttonOrder[i-1])));
+  const timing=harness();
+  timing.$('subPath').value='Album';timing.$('useFingerprint').checked=false;
+  await timing.run('startScan()');
+  assert.equal(timing.calls.find(c=>c.url==='/api/scan').body.use_fingerprint,false);
+  timing.context.performance.now=()=>91250;
+  timing.run("currentJobId='scan';observeScanCompletion({id:'scan',status:'done',scanned:20,scan_elapsed_seconds:90})");
+  assert.equal(timing.$('progressText').textContent,'20곡 스캔 완료 · 1분 31.25초');
+  assert.equal(timing.$('progressText').dataset.serverSeconds,'90');
+  timing.context.performance.now=()=>999999;
+  assert.equal(timing.run("scanCompletionText({id:'scan',scanned:20,scan_elapsed_seconds:90})"),'20곡 스캔 완료 · 1분 31.25초');
+  // After reload, the persisted server duration is the fallback.
+  assert.equal(harness().run("scanCompletionText({id:'persisted',scanned:20,scan_elapsed_seconds:91.25})"),'20곡 스캔 완료 · 1분 31.25초');
+  assert.equal(timing.run('formatScanDuration(undefined)'),'0.00초');
   console.log('PASS: temporary/confirmed folder selection; persistent tree; modal apply/cancel/Escape/validation/remember; control order, centered full-width grid and aligned panels; P2 handlers preserved.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

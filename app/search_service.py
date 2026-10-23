@@ -174,6 +174,8 @@ def sound(path, config, query, duration, cancel=None, on_wait=None):
 
 def search(path, query, country, duration, data_root, mode="text", use_fingerprint=True,
            previous=None, cancel=None, on_wait=None):
+    started = time.perf_counter()
+    timing = {"network": {}, "sources": {}}
     config = configuration(data_root)
     country = country or config.country
     if country not in COUNTRIES:
@@ -185,10 +187,14 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
         def guarded(source, fn):
             if cancel and cancel.is_set():
                 return [], []
+            tick = time.perf_counter()
             try:
-                return fn(), []
+                with net.measure_network(timing["network"]):
+                    return fn(), []
             except (net.NetworkError, net.RateLimited, ValueError, TypeError, KeyError, AttributeError) as exc:
                 return [], [network_error(source, exc)]
+            finally:
+                timing["sources"][source] = time.perf_counter() - tick
         with ThreadPoolExecutor(max_workers=2) as pool:
             calls = [pool.submit(guarded, "iTunes", lambda: search_itunes.search(query, country, on_wait=on_wait, cancel=cancel)),
                      pool.submit(guarded, "MusicBrainz", lambda: search_mb.search(match.base_title(title), artist, query, on_wait=on_wait, cancel=cancel))]
@@ -203,9 +209,12 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
         errors.extend(problems)
     if mode == "sound" and previous:
         found.extend(candidate_model(value) for value in previous)
+    tick = time.perf_counter()
     ranked = rank(found, title, artist, duration)[:20]
+    timing["ranking_seconds"] = time.perf_counter() - tick
+    timing["search_seconds"] = time.perf_counter() - started
     status = "cancelled" if cancel and cancel.is_set() else "partial" if ranked and errors else "matched" if ranked else "error" if errors else "not_found"
-    return {"candidates": ranked, "search_errors": errors, "search_status": status,
+    return {"_timing": timing, "candidates": ranked, "search_errors": errors, "search_status": status,
             "query": query, "query_title": title, "query_artist": artist, "country": country,
             "used_fingerprint": used_sound, "weak_query": match.is_generic_name(title, artist)}
 

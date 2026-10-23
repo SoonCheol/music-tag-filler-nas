@@ -8,6 +8,7 @@ machine; no audio file is uploaded anywhere.
 from __future__ import annotations
 
 import collections
+from contextlib import contextmanager
 import threading
 import time
 from typing import Callable
@@ -49,12 +50,18 @@ class _Throttle:
         self._intervals: dict[str, float] = {}
         self._windows: dict[str, tuple[int, float]] = {}
         self._history: dict[str, collections.deque] = {}
+        self._base_intervals: dict[str, float] = {}
+        self._base_windows: dict[str, tuple[int, float]] = {}
+        self._recover_after: dict[str, float] = {}
+        self._successes: dict[str, int] = {}
 
     def set_interval(self, host: str, seconds: float) -> None:
         self._intervals[host] = seconds
+        self._base_intervals[host] = seconds
 
     def set_window(self, host: str, count: int, seconds: float) -> None:
         self._windows[host] = (count, seconds)
+        self._base_windows[host] = (count, seconds)
         self._history[host] = collections.deque()
 
     def _reserve(self, host: str) -> float:
@@ -78,18 +85,46 @@ class _Throttle:
         return start - now
 
     def wait(self, host: str, cancel: threading.Event | None = None) -> None:
+        # Book actual starts, not future slots. A Retry-After received while
+        # another worker sleeps must delay that worker too; cancelled workers
+        # must not consume future slots. Recheck under the short host-state lock.
+        while cancel is None or not cancel.is_set():
+            with self._lock:
+                now = time.monotonic()
+                delay = self._next_ok.get(host, 0.0) - now
+                if host in self._windows:
+                    count, span = self._windows[host]
+                    hist = self._history[host]
+                    while hist and hist[0] <= now - span:
+                        hist.popleft()
+                    if len(hist) >= count:
+                        delay = max(delay, hist[0] + span - now)
+                if delay <= 0:
+                    self._reserve(host)
+                    return
+            time.sleep(min(delay, 0.2))
+
+    def succeeded(self, host: str) -> None:
         with self._lock:
-            delay = self._reserve(host)
-        while delay > 0:
-            if cancel is not None and cancel.is_set():
+            if host not in self._recover_after:
                 return
-            step = min(delay, 0.2)
-            time.sleep(step)
-            delay -= step
+            self._successes[host] = self._successes.get(host, 0) + 1
+            # Recovery requires successful traffic AND a quiet period, never a
+            # new scan, so repeated scan clicks cannot reset server backoff.
+            if self._successes[host] < 3 or time.monotonic() < self._recover_after[host]:
+                return
+            if host in self._base_intervals:
+                self._intervals[host] = self._base_intervals[host]
+            if host in self._base_windows:
+                self._windows[host] = self._base_windows[host]
+            del self._recover_after[host]
+            self._successes.pop(host, None)
 
     def slow_down(self, host: str, seconds: float) -> None:
         """After a 429, hold the host for `seconds` and pace it more conservatively."""
         with self._lock:
+            self._recover_after[host] = time.monotonic() + max(seconds, 60.0 if host in self._windows else 30.0)
+            self._successes[host] = 0
             self._next_ok[host] = max(self._next_ok.get(host, 0.0), time.monotonic() + seconds)
             if host in self._windows:
                 count, span = self._windows[host]
@@ -130,6 +165,27 @@ def _host(url: str) -> str:
     return urlsplit(url).netloc.lower()
 
 
+
+_timing = threading.local()
+
+
+@contextmanager
+def measure_network(metrics):
+    previous = getattr(_timing, "metrics", None)
+    _timing.metrics = metrics
+    try:
+        yield
+    finally:
+        _timing.metrics = previous
+
+
+def _metric(host, name, value):
+    metrics = getattr(_timing, "metrics", None)
+    if metrics is not None:
+        row = metrics.setdefault(host, {})
+        row[name] = row.get(name, 0) + value
+
+
 def request(method: str, url: str, *, params: dict | None = None, data: dict | None = None,
             on_wait: WaitCallback | None = None, cancel: threading.Event | None = None,
             stream: bool = False) -> requests.Response:
@@ -139,29 +195,46 @@ def request(method: str, url: str, *, params: dict | None = None, data: dict | N
     for attempt in range(MAX_RETRIES + 1):
         if cancel is not None and cancel.is_set():
             raise NetworkError("cancelled")
+        tick = time.perf_counter()
         throttle.wait(host, cancel)
+        _metric(host, "rate_wait_seconds", time.perf_counter() - tick)
         if cancel is not None and cancel.is_set():
             raise NetworkError("cancelled")
+        tick = time.perf_counter()
+        _metric(host, "requests", 1)
         try:
             resp = session().request(method, url, params=params, data=data, timeout=TIMEOUT, stream=stream)
         except requests.RequestException as exc:
+            _metric(host, "errors", 1)
+            _metric(host, "timeouts", int(isinstance(exc, requests.Timeout)))
             raise NetworkError(str(exc)) from exc
+        finally:
+            _metric(host, "http_seconds", time.perf_counter() - tick)
+        _metric(host, "status_" + str(resp.status_code), 1)
         if resp.status_code in (429, 503) and attempt < MAX_RETRIES:
+            _metric(host, "retries", 1)
+            resp.close()
             if resp.status_code == 503 and host in OVERLOAD_503_HOSTS:
                 # back off 1, 2, 4 s for this request only; the host keeps its pace
                 wait = max(_retry_after(resp, default=1.0), float(2 ** attempt))
                 last_wait = wait
+                tick = time.perf_counter()
                 _sleep(wait, cancel)
+                _metric(host, "retry_sleep_seconds", time.perf_counter() - tick)
                 continue
             wait = _retry_after(resp, default=2.0 * (attempt + 1))
             last_wait = wait
             throttle.slow_down(host, wait)
             if on_wait is not None:
                 on_wait(wait)
+            tick = time.perf_counter()
             _sleep(wait, cancel)
+            _metric(host, "retry_sleep_seconds", time.perf_counter() - tick)
             continue
         if resp.status_code in (429, 503):
             raise RateLimited(last_wait or 5.0)
+        if resp.status_code < 400:
+            throttle.succeeded(host)
         return resp
     raise RateLimited(last_wait or 5.0)  # pragma: no cover - loop always returns or raises
 

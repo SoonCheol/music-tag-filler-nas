@@ -1,4 +1,4 @@
-import os, json, re, uuid, time, threading
+import os, json, re, uuid, time, threading, logging
 from pathlib import Path
 from typing import List, Dict, Optional, Literal
 import requests, musicbrainzngs
@@ -31,6 +31,7 @@ app = FastAPI(title="음악 정보 채우기 NAS Web", version="2.0.0")
 # --- job store ---
 jobs: Dict[str, dict] = {}
 job_store_error = None
+_scan_clocks = {}
 try:
     jobs = job_store.load(DATA_ROOT)
 except (OSError, ValueError, TypeError) as exc:
@@ -41,6 +42,14 @@ def save_jobs(job_id=None):
     with storage.OPERATION_LOCK:
         if job_store_error:
             raise OSError(job_store_error)
+        for key in [job_id] if job_id else list(_scan_clocks):
+            if key in _scan_clocks and key in jobs:
+                started, accumulated = _scan_clocks[key]
+                segment = max(0.0, time.perf_counter() - started)
+                jobs[key].update(scan_segment_seconds=segment,
+                                 scan_elapsed_seconds=accumulated + segment)
+                if jobs[key].get("status") not in job_service.ACTIVE:
+                    jobs[key].update(scan_segment_finished_at=time.time(), scan_finished_at=time.time())
         job_store.save(JOBS_FILE.parent, jobs, [job_id] if job_id else None)
 
 
@@ -109,6 +118,17 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
     if not job:
         return
     cancelled = ScanCancellation(job)
+    scan_started = time.perf_counter()
+    with storage.OPERATION_LOCK:
+        _scan_clocks[job_id] = (scan_started, job.get("scan_elapsed_seconds", 0.0))
+        job.setdefault("scan_started_at", time.time())
+        job.update(scan_segment_started_at=time.time(), scan_segment_seconds=0.0)
+        job.pop("scan_segment_finished_at", None)
+        job.pop("scan_finished_at", None)
+    logging.getLogger("uvicorn.error").info("scan_timing %s", json.dumps({
+        "event": "start", "job_id": job_id, "options": opts,
+        "intervals": search_service.net.throttle._intervals,
+        "windows": search_service.net.throttle._windows}))
     try:
         files = job_service.collect(MUSIC_ROOT, opts.get("paths") or [sub_path], opts.get("recurse", True), cancel=cancelled)
         previous = job.get("results", []) if resume else []
@@ -138,7 +158,7 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                     if time.monotonic() - last_metadata_save >= 2:
                         save_jobs(job_id)
                         last_metadata_save = time.monotonic()
-                ready.append((path, relative, original, artist, title))
+                ready.append((path, relative, original, artist, title, time.perf_counter(), len(ready) + 1))
             except Exception as exc:
                 with storage.OPERATION_LOCK:
                     by_path[relative].update(error=str(exc), search_phase="error", file_state="error")
@@ -147,7 +167,9 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
         with storage.OPERATION_LOCK:
             save_jobs(job_id)
         def lookup(item):
-            path, relative, original, artist, title = item
+            path, relative, original, artist, title, queued_at, index = item
+            lookup_started = time.perf_counter()
+            timing = {}
             if cancelled.is_set():
                 return None
             with storage.OPERATION_LOCK:
@@ -161,10 +183,13 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                                               on_wait=lambda seconds: job.update(search_wait_seconds=seconds))
                 if cancelled.is_set():
                     return None
+                timing = found.pop("_timing", {})
                 result = {**found, "path": relative, "original": original,
                           "parsed": {"artist": artist, "title": title}, "lyrics": None,
                           "lyrics_status": "skipped", "search_phase": "complete"}
+                tick = time.perf_counter()
                 prepare_result(result)
+                timing["candidate_seconds"] = time.perf_counter() - tick
                 result["scan_auto_selected"] = result["best"] is not None
                 result["file_state"] = file_state(result)
                 if result.get("search_status") in ("error", "failed"):
@@ -180,7 +205,14 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                 by_path[relative].update(result)
                 job["scanned"] += 1
                 job["diagnostic"] = ""
+                tick = time.perf_counter()
                 save_jobs(job_id)
+                timing["json_seconds"] = time.perf_counter() - tick
+            timing.update(event="song", job_id=job_id, index=index, path=relative,
+                          queue_seconds=lookup_started - queued_at,
+                          total_seconds=time.perf_counter() - lookup_started,
+                          completed_seconds=time.perf_counter() - scan_started)
+            logging.getLogger("uvicorn.error").info("scan_timing %s", json.dumps(timing))
             return relative
         with ThreadPoolExecutor(max_workers=3) as pool:
             iterator = iter(ready)
@@ -215,6 +247,12 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                 save_jobs(job_id)
             except OSError:
                 job["state_error"] = "작업 기록 실패. 기존 디스크 기록은 보존했습니다"
+    finally:
+        with storage.OPERATION_LOCK:
+            _scan_clocks.pop(job_id, None)
+        logging.getLogger("uvicorn.error").info("scan_timing %s", json.dumps({
+            "event": "finish", "job_id": job_id, "status": job.get("status"),
+            "elapsed_seconds": time.perf_counter() - scan_started}))
 
 _activity_lock = threading.RLock()
 _activity = {}
@@ -690,6 +728,7 @@ def research_file(job_id: str, request: SearchRequest):
                                   mode=request.mode, use_fingerprint=request.use_fingerprint,
                                   previous=result.get("candidates") if request.mode == "sound" else None,
                                   on_wait=lambda seconds: result.update(search_wait_seconds=seconds))
+    found.pop("_timing", None)
     with storage.OPERATION_LOCK:
         if result.get("search_generation") != generation or storage.revision(path) != original["revision"]:
             raise HTTPException(409, "파일 또는 검색 요청이 변경되어 오래된 결과를 적용하지 않았습니다")
