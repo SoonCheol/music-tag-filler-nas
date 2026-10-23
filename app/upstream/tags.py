@@ -332,8 +332,7 @@ def _read_ids(fmt: str, tg) -> Ids:
 
 
 def _set_ids_id3(id3: ID3, ids: Ids) -> None:
-    """Write the whole identity set (called after update_to_v23, which drops the
-    v2.4-only TSOP; ID3v2.3 has no multi-value text, so IDs are joined by '/')."""
+    """Write the whole identity set after any required version conversion."""
     def txxx(desc: str, values: list[str]) -> None:
         id3.delall("TXXX:" + desc)
         if values:
@@ -529,6 +528,7 @@ def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: st
 
 def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
                replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None, synced: str | None = None) -> None:
+    version = 3 if mp3.tags is not None and mp3.tags.version[:2] == (2, 3) else 4
     if mp3.tags is None:
         mp3.add_tags()
     id3: ID3 = mp3.tags
@@ -558,14 +558,47 @@ def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | 
             id3.delall("SYLT")
             id3.add(SYLT(encoding=1, lang="und", format=2, type=1, desc="LRCLIB", text=lines))
     preserved_sort = [frame for key in ("TSOP", "TSO2") for frame in id3.getall(key)] if ids is None else []
-    id3.update_to_v23()
+    if version == 3:
+        id3.update_to_v23()
     if ids is not None:
         _set_ids_id3(id3, final_ids)
     else:
         # v2.3 conversion removes these existing sort frames: retain their original objects.
         for frame in preserved_sort:
             id3.add(frame)
-    mp3.save(v2_version=3, v1=1)
+    # Null separators retain existing multi-value v2.3 text without joining it.
+    mp3.save(v2_version=version, v1=1, v23_sep=None)
+
+
+def id3_preserved_frames(path: str, fields: set[str], *, cover=False,
+                         lyrics=False, synced=False, ids=False):
+    """Compare decoded frame payloads, allowing only serialization encoding changes.
+
+    Mutagen normalizes v2.2/v2.3 frames to v2.4 on read. Comparing that same
+    representation on both sides avoids version-specific date frame aliases.
+    Lists remain lists: losing or joining an unselected text value fails.
+    """
+    import copy
+    audio = MP3(path)
+    if audio.tags is None:
+        return {}, []
+    excluded = {key for field, key in {
+        "title": "TIT2", "artist": "TPE1", "album": "TALB",
+        "album_artist": "TPE2", "year": "TDRC", "track": "TRCK",
+        "genre": "TCON"}.items() if field in fields}
+    excluded.update(key for key, changed in (("APIC", cover), ("USLT", lyrics),
+                                            ("SYLT", synced)) if changed)
+    identity_keys = {"TXXX:" + name for name in (
+        _TXXX_ARTIST, _TXXX_ALBUM_ARTIST, _TXXX_ALBUM, _TXXX_ITUNES_ARTIST)}
+    identity_keys.update({"UFID:http://musicbrainz.org", "TSOP", "TSO2"})
+    result = {}
+    for key, frame in audio.tags.items():
+        if frame.FrameID in excluded or (ids and key in identity_keys):
+            continue
+        payload = copy.deepcopy(vars(frame))
+        payload.pop("encoding", None)
+        result[key] = payload
+    return result, list(audio.tags.unknown_frames)
 
 
 def _vorbis_set(vc, tags: Tags, fields: set[str] | None = None) -> None:
@@ -855,7 +888,8 @@ def _remove_cover(path: str) -> None:
     fmt, audio = _open(path)
     if fmt == "MP3" and audio.tags is not None:
         audio.tags.delall("APIC")
-        audio.save(v2_version=3, v1=1)
+        version = 3 if audio.tags.version[:2] == (2, 3) else 4
+        audio.save(v2_version=version, v1=1, v23_sep=None)
     elif fmt == "FLAC":
         audio.clear_pictures()
         audio.save()

@@ -253,6 +253,19 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
                             ids=final_ids if final_ids != info.ids else None, replace_ids=True,
                             lyrics=lyrics, fields=changed_fields, synced=synced)
             verified = tags.read_file(str(stage))
+            if info.fmt == "MP3":
+                preserve = dict(cover=prepared is not None, lyrics=lyrics is not None,
+                                synced=synced is not None, ids=final_ids != info.ids)
+                before_frames = tags.id3_preserved_frames(str(path), changed_fields, **preserve)
+                after_frames = tags.id3_preserved_frames(str(stage), changed_fields, **preserve)
+                if before_frames != after_frames:
+                    raise StorageError("기존 ID3 프레임이 변경되어 저장을 차단했습니다")
+                with path.open("rb") as stream:
+                    header = stream.read(4)
+                expected_version = 3 if header == b"ID3\x03" else 4
+                with stage.open("rb") as stream:
+                    if stream.read(4) != b"ID3" + bytes([expected_version]):
+                        raise StorageError("ID3 버전 저장 검증 실패")
             if verified.tags != new_tags or (lyrics is not None and verified.lyrics != lyrics.strip()):
                 raise StorageError("저장 검증 실패: 원본 파일을 변경하지 않았습니다")
             if (synced is not None and verified.synced != search_lyrics.synced_lines(synced)) or (synced is None and verified.synced != info.synced):
