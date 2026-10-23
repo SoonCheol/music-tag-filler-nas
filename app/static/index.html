@@ -914,7 +914,7 @@ function saveItem(r){
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
-    values:{...r._draft},fields:[...r._fields],include_cover:$('saveCover').checked&&(!!r._coverId||(!!r._candidateId&&r._fields.length>0&&hasCandidateCoverSource(r))),cover_id:$('saveCover').checked?r._coverId||null:null,include_ids:$('includeIds').checked,lyrics_id:lyricChoice(r)?.lyrics_id||null};
+    values:{...r._draft},fields:[...r._fields],include_cover:$('saveCover').checked&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:$('saveCover').checked?r._coverId||null:null,include_ids:$('includeIds').checked,lyrics_id:lyricChoice(r)?.lyrics_id||null};
 }
 function reportSave(res){
   const unchanged=res.unchanged??(res.results||[]).filter(o=>o.reason==='unchanged').length;
@@ -965,7 +965,7 @@ function plannedChanges(r){
   const emptyOnly=$('onlyEmpty').checked;
   const candidate=r.candidates?.find(c=>c.id===r._candidateId);
   const changes=tagFields.filter(f=>active&&r._fields.includes(f)&&(!emptyOnly||!base[f])&&String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||'')!==String(base[f]));
-  const cover=$('saveCover').checked&&(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&r._fields.length>0&&hasCandidateCoverSource(r)));
+  const cover=$('saveCover').checked&&(!emptyOnly||!r.original?.has_cover)&&(!!r._coverId||(active&&!!candidate&&hasCandidateCoverSource(r)));
   const final={...base};changes.forEach(f=>final[f]=String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||''));
   const lyric=lyricPlan(r),lyrics=lyric.change;
   return {changes,cover,lyrics,lyrics_text:lyric.text,rename:$('renameFiles').checked,ids:active&&!!candidate&&$('includeIds').checked};

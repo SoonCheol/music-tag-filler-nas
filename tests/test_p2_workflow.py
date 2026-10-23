@@ -811,3 +811,38 @@ class P2Tests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(request)
             self.assertEqual(error.exception.code,400)
+    def test_candidate_cover_only_no_text_fields_and_identical_skip(self):
+        for ext in ('mp3', 'flac', 'm4a', 'ogg'):
+            for scope in ('current', 'selected'):
+                with self.subTest(ext=ext, scope=scope):
+                    paths=[self.copy('cover-only-'+scope+'-'+str(i)+'.'+ext) for i in range(1 if scope=='current' else 2)]
+                    original=[path.read_bytes() for path in paths]
+                    infos=[p0.tags.read_file(str(path)) for path in paths]
+                    rows=self.job(paths);blue=p0.image_bytes('blue')
+                    items=[self.item(row,selection='manual',candidate_id=main.candidate_id(row['candidates'][0]),fields=[],values={},include_cover=True,include_ids=False) for row in rows]
+                    with patch.object(search_service,'fetch_cover',return_value=(blue,[])) as fetch:
+                        result=self.http(self.request(items,scope=scope,save_cover=True,save_lyrics=False,only_empty=False,rename=False))
+                    self.assertEqual(result['saved'],len(paths));self.assertEqual(result['failed'],0);self.assertEqual(fetch.call_count,len(paths))
+                    for path,row,before,first in zip(paths,rows,infos,original):
+                        after=p0.tags.read_file(str(path))
+                        self.assertEqual(after.cover,blue);self.assertNotEqual(after.cover,before.cover)
+                        self.assertEqual(after.tags,before.tags);self.assertEqual(after.ids,before.ids);self.assertEqual(after.lyrics,before.lyrics)
+                        unchanged=path.read_bytes(),path.stat().st_mtime_ns
+                        sidecar=p0.tags.backup_path(str(path));backup=Path(sidecar).read_bytes()
+                        same=self.item(row,selection='manual',candidate_id=main.candidate_id(row['candidates'][0]),fields=[],values={},include_cover=True,include_ids=False)
+                        with patch.object(search_service,'fetch_cover',return_value=(blue,[])):
+                            second=self.http(self.request([same],save_cover=True,save_lyrics=False,only_empty=False,rename=False))
+                        self.assertEqual(second['unchanged'],1);self.assertEqual(second['saved'],0)
+                        self.assertEqual((path.read_bytes(),path.stat().st_mtime_ns),unchanged)
+                        self.assertEqual(Path(sidecar).read_bytes(),backup)
+                        storage.restore(path,self.root,self.backups,storage.revision(path));self.assertEqual(path.read_bytes(),first)
+
+    def test_candidate_cover_only_still_respects_cover_and_empty_options(self):
+        for checked,only_empty in ((False,False),(True,True)):
+            path=self.copy('protected-'+str(checked)+'.mp3');row=self.job([path])[0]
+            before=path.read_bytes(),path.stat().st_mtime_ns
+            item=self.item(row,selection='manual',candidate_id=main.candidate_id(row['candidates'][0]),fields=[],values={},include_cover=True)
+            with patch.object(search_service,'fetch_cover') as fetch:
+                result=self.http(self.request([item],save_cover=checked,save_lyrics=False,only_empty=only_empty,rename=False))
+            fetch.assert_not_called();self.assertEqual(result['unchanged'],1)
+            self.assertEqual((path.read_bytes(),path.stat().st_mtime_ns),before)

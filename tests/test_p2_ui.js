@@ -217,6 +217,13 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal(ops.$('operationSummary').textContent,'백그라운드 작업 2건 진행 중');assert.equal(ops.$('operationDetails').hidden,false);assert.ok(ops.$('operationDetails').innerHTML.includes('b.mp3'));
   ops.run('toggleOperationDetails()');assert.equal(ops.$('operationDetails').hidden,true);
   ops.run('renderOperationStatus([])');assert.equal(ops.$('operationStatus').hidden,true);assert.equal(ops.run('operationExpanded'),false);
+  const coverOnly=harness();coverOnly.$('onlyEmpty').checked=false;
+  coverOnly.run("requestCandidateCover=()=>Promise.resolve(null);adoptJob({id:'cover-only',results:[{path:'cover.mp3',original:{revision:'a'.repeat(64),title:'Original',has_cover:true},candidates:[{id:'blue',title:'Changed title',album:'Changed album',cover_url:'https://example.invalid/blue.jpg'}]}]});applyCandidate(editingResult,editingResult.candidates[0]);document.querySelectorAll('.chg-check').forEach(c=>c.checked=false);captureCurrent()");
+  assert.equal(coverOnly.run('saveItem(editingResult).include_cover'),true,'candidate cover must not depend on text checkboxes');
+  assert.equal(coverOnly.run('plannedChanges(editingResult).cover'),true);
+  assert.equal(coverOnly.run('saveItem(editingResult).fields.length'),0);
+  coverOnly.$('saveCover').checked=false;assert.equal(coverOnly.run('saveItem(editingResult).include_cover'),false);
+  coverOnly.$('saveCover').checked=true;coverOnly.$('onlyEmpty').checked=true;assert.equal(coverOnly.run('plannedChanges(editingResult).cover'),false);
   const pathTip=harness();pathTip.context.window={innerWidth:1000,innerHeight:800};
   pathTip.$('folderToggle').getBoundingClientRect=()=>({left:20,top:40,bottom:60});pathTip.$('buttonTooltip').getBoundingClientRect=()=>({width:320,height:60});
   pathTip.run("pendingFolder='DANCE/Fitness Latino Path Full';folderLabel()");pathTip.$('folderToggle').listeners.mouseenter();
