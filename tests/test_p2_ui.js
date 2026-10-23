@@ -8,7 +8,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
-  function element() {return {value:'',checked:false,hidden:true,style:{},children:[],listeners:{},attributes:{},dataset:{},scrollTop:0,
+  function element() {return {value:'',checked:false,hidden:true,style:{setProperty(k,v){this[k]=v;}},children:[],listeners:{},attributes:{},dataset:{},scrollTop:0,
     showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return this.valid!==false;},
     innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];if(k==='src')this.src='';},focus(){},
     appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(...children){this.children.forEach(c=>c.parent=null);this.children=[];children.forEach(c=>this.appendChild(c));},
@@ -24,7 +24,7 @@ function harness() {
       else if(url.endsWith('/lyrics-search'))value=context.lyricResponse||{status:'not_found',searched:true,lyrics:'',lyrics_id:'no-result'};
       else if(url.startsWith('/api/path-changes'))value=context.pathChanges||{changes:[]};
       else if(url.endsWith('/rename'))value=context.renameResponse||{};
-      else if(url==='/api/jobs')value=context.jobsResponse||[];
+      else if(url==='/api/jobs'||url==='/api/jobs?summary=true')value=context.jobsResponse||[];
       else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
       else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
       else if(url==='/api/scan')value={job_id:'scan'};
@@ -317,7 +317,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   scanUi.context.jobsResponse=[scanJob];
   await scanUi.run('pollJobs()');
   assert.ok(scanUi.$('jobs').children[0].innerHTML.includes("cancelSpecific('scan-stop')"));
-  await scanUi.run("cancelSpecific('scan-stop')");
+  const stopConfirmation=scanUi.run("cancelSpecific('scan-stop')");scanUi.run('resolveAction(true)');await stopConfirmation;
   assert.ok(scanUi.calls.some(c=>c.url==='/api/jobs/scan-stop/cancel'&&c.method==='POST'));
   scanJob.status='cancelling';await scanUi.run('pollJobs()');
   assert.match(scanUi.$('progressText').textContent,/전체 3곡.*검색 완료 1곡.*남은 2곡.*cancelling/);
@@ -383,7 +383,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.run('adoptJob(job)');await h.run('uploadCover({size:100,type:"image/png"})');
   assert.equal(h.run('editingResult._coverId'),'cover-token');assert.equal(h.run('editingResult._selection'),'edit');
   assert(!h.calls.some(c=>c.url.endsWith('/save')));
-  await h.run('applyCoverToAll()');assert.equal(h.run('currentResults[1]._coverId'),'cover-token');
+  const coverAllConfirmation=h.run('applyCoverToAll()');h.run('resolveAction(true)');await coverAllConfirmation;assert.equal(h.run('currentResults[1]._coverId'),'cover-token');
   const item=h.run('saveItem(currentResults[1])');assert.equal(item.cover_id,'cover-token');assert.equal(item.include_ids,true);
   h.$('onlyEmpty').checked=false;
   h.context.candidate={id:'latin',title:'Song',artist:'原文',artist_latin:'Latin',albumartist:'原文',album_artist_latin:'Latin'};
@@ -449,6 +449,22 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
     assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,enabled);
     assert.equal(body.items[0].include_ids,enabled);assert.equal(body.cover_max_px,enabled?100:1000);
   }
+  const batch=harness();batch.context.jobsResponse=[{id:'done',status:'done',results:[]},{id:'stopped',status:'cancelled',results:[]},{id:'busy',status:'scanning',results:[]}];
+  await batch.run('pollJobs()');batch.run('selectBackgroundJobs(true)');
+  assert.equal(batch.run('selectedBackgroundJobs.size'),2);assert.equal(batch.$('deleteSelectedJobs').textContent,'선택 작업 삭제 (2건)');
+  assert.ok(batch.$('jobs').children[2].innerHTML.includes('disabled'));
+  const batchFetch=batch.context.fetch;
+  batch.context.fetch=async(url,options={})=>{if(url==='/api/jobs/delete'){const ids=JSON.parse(options.body).ids;batch.context.jobsResponse=batch.context.jobsResponse.filter(j=>!ids.includes(j.id));}return batchFetch(url,options);};
+  const beforeDelete=batch.calls.filter(c=>c.url==='/api/jobs/delete').length;
+  const cancelBatch=batch.run('deleteSelectedBackgroundJobs()');batch.run('resolveAction(false)');await cancelBatch;
+  assert.equal(batch.calls.filter(c=>c.url==='/api/jobs/delete').length,beforeDelete);
+  const acceptBatch=batch.run('deleteSelectedBackgroundJobs()');batch.run('resolveAction(true)');await acceptBatch;
+  const deleted=batch.calls.filter(c=>c.url==='/api/jobs/delete').at(-1);assert.deepEqual(deleted.body.ids,['done','stopped']);
+  assert.equal(batch.run('allJobs.length'),1);assert.equal(batch.run('selectedBackgroundJobs.size'),0);
+  batch.run('currentResults=Array(10000);filteredResults=[];editingResult=null;renderFileList()');
+  assert.equal(batch.$('fileColumn').style['--number-width'],'56px');
+  assert.ok(html.includes('position:fixed;inset:0;margin:auto;box-sizing:border-box'));
+  assert.ok(!/\bconfirm\(/.test(script));
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size);
   assert(html.indexOf('id="scanControls"')<html.indexOf('id="fileColumn"'));
   assert(html.indexOf('id="scanControls"')<html.indexOf('파일 목록 <span'));

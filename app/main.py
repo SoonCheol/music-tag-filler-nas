@@ -14,7 +14,7 @@ from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor, wait, FIRST_COMPLETED
 import io
 import inspect
-from . import storage, search_service, job_service, preferences, rename_service
+from . import storage, search_service, job_service, preferences, rename_service, job_store
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
 MUSIC_ROOT = Path(os.getenv("MUSIC_ROOT", "/music"))
@@ -31,18 +31,18 @@ app = FastAPI(title="음악 정보 채우기 NAS Web", version="2.0.0")
 # --- job store ---
 jobs: Dict[str, dict] = {}
 job_store_error = None
-if JOBS_FILE.exists():
-    try:
-        raw = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
-        jobs = job_service.normalize_jobs(raw)
-    except (OSError, ValueError, TypeError):
-        job_store_error = "jobs.json 읽기/검증 실패. 원본 상태 파일을 보존하며 새 작업 기록을 차단합니다"
+try:
+    jobs = job_store.load(DATA_ROOT)
+except (OSError, ValueError, TypeError) as exc:
+    raise RuntimeError("작업 기록을 안전하게 열 수 없습니다: " + str(exc)) from exc
 
-def save_jobs():
+
+def save_jobs(job_id=None):
     with storage.OPERATION_LOCK:
         if job_store_error:
             raise OSError(job_store_error)
-        storage._replace_file(JOBS_FILE, json.dumps(jobs, ensure_ascii=False, indent=2).encode("utf-8"))
+        job_store.save(JOBS_FILE.parent, jobs, [job_id] if job_id else None)
+
 
 def parse_filename(p: Path):
     return original_match.guess_from_filename(str(p))
@@ -120,7 +120,7 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
         with storage.OPERATION_LOCK:
             job.update(status="scanning", total=len(files), results=rows, scanned=len(retained),
                        missing_paths=missing, diagnostic="기존 태그 읽는 중", search_wait_seconds=0)
-            save_jobs()
+            save_jobs(job_id)
         by_path = {r["path"]: r for r in rows}
         ready = []
         last_metadata_save = time.monotonic()
@@ -134,23 +134,25 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                 artist, title = original.get("artist") or artist, original.get("title") or title
                 with storage.OPERATION_LOCK:
                     by_path[relative].update(original=original, parsed={"artist": artist, "title": title})
+                    job["view_revision"] = job.get("view_revision",0)+1
                     if time.monotonic() - last_metadata_save >= 2:
-                        save_jobs()
+                        save_jobs(job_id)
                         last_metadata_save = time.monotonic()
                 ready.append((path, relative, original, artist, title))
             except Exception as exc:
                 with storage.OPERATION_LOCK:
                     by_path[relative].update(error=str(exc), search_phase="error", file_state="error")
                     job["scanned"] += 1
-                    save_jobs()
+                    save_jobs(job_id)
         with storage.OPERATION_LOCK:
-            save_jobs()
+            save_jobs(job_id)
         def lookup(item):
             path, relative, original, artist, title = item
             if cancelled.is_set():
                 return None
             with storage.OPERATION_LOCK:
                 by_path[relative].update(search_phase="running", file_state="running")
+                job["view_revision"] = job.get("view_revision",0)+1
                 job["current_file"] = relative
             try:
                 found = search_service.search(path, original_match.build_query(title, artist), opts.get("country"),
@@ -178,7 +180,7 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
                 by_path[relative].update(result)
                 job["scanned"] += 1
                 job["diagnostic"] = ""
-                save_jobs()
+                save_jobs(job_id)
             return relative
         with ThreadPoolExecutor(max_workers=3) as pool:
             iterator = iter(ready)
@@ -201,16 +203,16 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             job.update(status="cancelled" if cancelled.is_set() else "done", finished_at=time.time(),
                        current_file="", search_wait_seconds=0,
                        diagnostic="중지 완료" if cancelled.is_set() else "")
-            save_jobs()
+            save_jobs(job_id)
     except job_service.ScanCancelled:
         with storage.OPERATION_LOCK:
             job.update(status="cancelled", finished_at=time.time(), current_file="", search_wait_seconds=0, diagnostic="중지 완료")
-            save_jobs()
+            save_jobs(job_id)
     except Exception as exc:
         with storage.OPERATION_LOCK:
             job.update(status="failed", error=str(exc), diagnostic="작업 상태 기록 또는 파일 탐색 실패")
             try:
-                save_jobs()
+                save_jobs(job_id)
             except OSError:
                 job["state_error"] = "작업 기록 실패. 기존 디스크 기록은 보존했습니다"
 
@@ -337,7 +339,7 @@ def start_scan(req: ScanRequest, background_tasks: BackgroundTasks):
         "cancel_requested": False
     }
     try:
-        save_jobs()
+        save_jobs(job_id)
     except OSError as exc:
         del jobs[job_id]
         raise HTTPException(503, str(exc))
@@ -360,11 +362,15 @@ def public_job(job):
 
 @app.get("/api/jobs")
 @job_locked
-def list_jobs():
-    for job in jobs.values():
+def list_jobs(summary: bool = False):
+    ordered = sorted(jobs.values(), key=lambda x: x.get("created_at",0), reverse=True)
+    if summary:
+        return [{k:v for k,v in job.items() if k not in ("results", "options")} for job in ordered]
+    for job in ordered:
         for result in job.get("results", []):
-            prepare_result(result)
-    return [public_job(job) for job in sorted(jobs.values(), key=lambda x: x.get("created_at",0), reverse=True)]
+            if not result.get("ranking_version"):
+                prepare_result(result)
+    return [public_job(job) for job in ordered]
 
 @app.get("/api/jobs/{job_id}")
 @job_locked
@@ -372,7 +378,8 @@ def get_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(404, "job not found")
     for result in jobs[job_id].get("results", []):
-        prepare_result(result)
+        if not result.get("ranking_version"):
+            prepare_result(result)
     return public_job(jobs[job_id])
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -391,24 +398,46 @@ def cancel_job(job_id: str):
         job["cancelled_at"] = time.time()
     else:
         raise HTTPException(400, "중지할 수 없는 상태입니다")
-    save_jobs()
+    save_jobs(job_id)
     return {"status": job["status"], "id": job_id}
+
+def remove_job_records(ids):
+    if not ids or len(ids)!=len(set(ids)):
+        raise HTTPException(400,"삭제할 작업을 중복 없이 선택하세요")
+    for key in ids:
+        if key not in jobs:raise HTTPException(404,"job not found")
+        if jobs[key].get("status") in job_service.ACTIVE:
+            raise HTTPException(409,"진행 중인 작업은 삭제할 수 없습니다")
+    with save_tasks_lock:
+        if any(task.get("job_id") in ids and task.get("status") in ("queued","saving") for task in save_tasks.values()):
+            raise HTTPException(409,"태그 저장 대기 또는 진행 중인 작업 기록은 삭제할 수 없습니다")
+    removed=[]
+    for key in ids:
+        try:
+            job_store.delete(JOBS_FILE.parent,[key])
+        except OSError as exc:
+            raise HTTPException(503,{"message":"작업 기록 삭제 실패: "+str(exc),"deleted":removed})
+        del jobs[key];removed.append(key)
+    return {"deleted":removed}
+
+
+class DeleteJobsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: List[str] = Field(min_length=1,max_length=1000)
+
+
+@app.post("/api/jobs/delete")
+@job_locked
+def delete_jobs(request: DeleteJobsRequest):
+    return remove_job_records(request.ids)
+
 
 @app.delete("/api/jobs/{job_id}")
 @job_locked
 def delete_job(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(404, "job not found")
-    job = jobs[job_id]
-    if job.get("status") in ("scanning", "queued", "cancelling"):
-        raise HTTPException(400, "진행 중인 작업은 먼저 중지하세요")
-    del jobs[job_id]
-    try:
-        save_jobs()
-    except OSError as exc:
-        jobs[job_id] = job
-        raise HTTPException(503, "삭제 기록 실패: " + str(exc))
-    return {"deleted": job_id}
+    remove_job_records([job_id])
+    return {"deleted":job_id}
+
 
 @app.post("/api/jobs/{job_id}/resume")
 @job_locked
@@ -438,7 +467,7 @@ def resume_job(job_id: str, background_tasks: BackgroundTasks):
     job["status"] = "queued"
     job["cancel_requested"] = False
     try:
-        save_jobs()
+        save_jobs(job_id)
     except OSError as exc:
         job.update(status=previous_status, cancel_requested=previous_cancel)
         raise HTTPException(503, "이어하기 기록 실패: " + str(exc))
@@ -666,7 +695,7 @@ def research_file(job_id: str, request: SearchRequest):
             raise HTTPException(409, "파일 또는 검색 요청이 변경되어 오래된 결과를 적용하지 않았습니다")
         result.update(found, original=original)
         prepare_result(result)
-        save_jobs()
+        save_jobs(job_id)
         return result
 
 
@@ -696,6 +725,7 @@ def file_state(result):
 
 
 def prepare_result(result):
+    result["ranking_version"] = 1
     hint = result.get("parsed", {})
     artist = result.get("query_artist", result.get("original", {}).get("artist") or hint.get("artist", ""))
     title = result.get("query_title", result.get("original", {}).get("title") or hint.get("title", ""))

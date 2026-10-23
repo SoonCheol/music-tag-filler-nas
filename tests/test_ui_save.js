@@ -9,7 +9,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
   .replace(/^loadFolders\(\);\s*^pollJobs\(\);/m, '');
 const elements = new Map(), checks = [], sent = [], notices = [];
 function element() {
-  return { value: '', checked: false, hidden: true, style: {}, children: [], listeners: {},
+  return { value: '', checked: false, hidden: true, style: {setProperty(k,v){this[k]=v;}}, children: [], listeners: {},
     showModal() { this.open=true; }, close() { this.open=false; }, innerHTML: '', textContent: '', classList: { add() {}, remove() {} },
     setAttribute() {}, focus() {}, appendChild(child) { this.children.push(child); },
     replaceChildren(...children) { this.children = children; },
@@ -84,7 +84,7 @@ function result(path) {
   run('adoptJob(otherJob)');
   assert.equal($('chg_title').value, 'Original');
   assert.equal(run('editingResult._selection'), 'none');
-  await run('resetChange()');
+  const restoreConfirmation=run('resetChange()');run('resolveAction(true)');await restoreConfirmation;
   assert.equal(sent.at(-1).url, '/api/revert/other.mp3');
   assert.equal(sent.at(-1).body.expected_revision, 'a'.repeat(64));
   assert.equal(run('editingResult._draftRevision'), 'b'.repeat(64));

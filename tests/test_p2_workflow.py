@@ -142,7 +142,8 @@ class P2Tests(unittest.TestCase):
                 main.resume_job("test", BackgroundTasks())
             self.assertEqual(main.jobs["test"]["status"], "interrupted")
             with self.assertRaises(HTTPException):
-                main.delete_job("test")
+                with patch.object(main.job_store,"delete",side_effect=OSError("disk full")):
+                    main.delete_job("test")
             self.assertIn("test", main.jobs)
 
     def test_delete_only_record_and_reject_active(self):
@@ -154,7 +155,7 @@ class P2Tests(unittest.TestCase):
         self.assertNotIn("test", main.jobs)
         self.job([path])
         main.jobs["test"]["status"] = "cancelling"
-        self.raw_http("/api/jobs/test", method="DELETE", expected=400)
+        self.raw_http("/api/jobs/test", method="DELETE", expected=409)
 
     def test_preferences_persist_keep_secrets_and_reject_invalid(self):
         path = self.data / "settings.json"

@@ -20,7 +20,7 @@ $files = @('app/main.py', 'app/static/index.html', 'app/storage.py',
     'app/upstream/__init__.py', 'app/upstream/tags.py', 'app/upstream/match.py',
     'app/upstream/net.py', 'app/upstream/search_lyrics.py', 'app/upstream/LICENSE', 'app/upstream/NOTICE.md',
     'app/search_service.py', 'app/upstream/search_itunes.py', 'app/upstream/search_mb.py',
-    'app/upstream/search_acoustid.py', 'app/upstream/pipeline.py', 'app/job_service.py', 'app/preferences.py', 'app/rename_service.py', 'app/lyric_assets.py',
+    'app/upstream/search_acoustid.py', 'app/upstream/pipeline.py', 'app/job_service.py', 'app/preferences.py', 'app/rename_service.py', 'app/lyric_assets.py', 'app/job_store.py',
     'Dockerfile', 'requirements.txt', 'requirements.lock.txt', '.dockerignore')
 $doRedeploy = !$BuildOnly
 if ($Redeploy -and $BuildOnly) { throw 'Choose either -Redeploy or -BuildOnly.' }
