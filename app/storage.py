@@ -60,7 +60,7 @@ def describe(path):
             "tracknumber": info.tags.track, "genre": info.tags.genre,
             "duration": info.length, "format": info.fmt, "bitrate": info.bitrate,
             "sample_rate": info.sample_rate, "ids": info.ids.as_dict(), "has_cover": bool(info.cover),
-            "has_lyrics": bool(info.lyrics.strip()), "lyrics_lines": len(info.lyrics.splitlines()) if info.lyrics.strip() else 0,
+            "has_synced": bool(info.synced), "has_lyrics": bool(info.lyrics.strip() or info.synced), "lyrics_lines": len(info.lyrics.splitlines()) if info.lyrics.strip() else 0,
             "lyrics_marker": search_lyrics.marker_only(info.lyrics),
             "revision": after}
 
@@ -206,7 +206,7 @@ def prepare_cover_change(data, current, max_px=1000):
 
 
 def save(path, root, backup_root, values, fields, only_empty, expected,
-         cover=None, lyrics=None, rename=False, ids=None, replace_lyrics=False):
+         cover=None, lyrics=None, rename=False, ids=None, replace_lyrics=False, synced=None, lrc=None, asset_root=None, rename_context=None):
     if revision(path) != expected:
         raise StorageError("스캔/확인 이후 파일이 변경되었습니다. 다시 스캔하세요")
     info = tags.read_file(str(path))
@@ -224,16 +224,25 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
     if cover is not None and not (only_empty and info.cover is not None):
         prepared = prepare_cover_change(cover, info.cover)
     # Empty input never deletes lyrics. Replacement requires explicit verified consent.
-    existing_lyrics = bool(info.lyrics.strip() and not search_lyrics.marker_only(info.lyrics))
+    existing_lyrics = bool(info.synced or (info.lyrics.strip() and (only_empty or not search_lyrics.marker_only(info.lyrics))))
     if (existing_lyrics and (only_empty or not replace_lyrics)) or not lyrics or not lyrics.strip() or lyrics.strip() == info.lyrics.strip():
         lyrics = None
+    from . import lyric_assets
+    if synced and (info.fmt != "MP3" or (only_empty and (info.synced or info.lyrics.strip())) or search_lyrics.synced_lines(synced) == info.synced):
+        synced = None
+    if only_empty and (info.synced or info.lyrics.strip()):
+        lrc = None
+    lrc_needed = lyric_assets.needed(path, lrc)
+    if rename and (lrc_needed or path.with_suffix(".lrc").exists()) and rename_context is None:
+        raise StorageError("LRC 연결을 위한 작업 기록이 필요합니다")
+    asset = None
     rename_needed = bool(rename and tags.rename_target(str(path), new_tags))
-    if new_tags == info.tags and final_ids == info.ids and prepared is None and lyrics is None and not rename_needed:
+    if new_tags == info.tags and final_ids == info.ids and prepared is None and lyrics is None and synced is None and not lrc_needed and not rename_needed:
         return {"status": "skipped", "reason": "unchanged", "original": describe(path), "path": str(path.relative_to(root))}
     writable(path)
     folder, manifest = ensure_backup(path, root, backup_root, expected)
     changed_fields = {field for field in final if final[field] != info.tags.as_dict()[field]}
-    content_changed = bool(changed_fields or final_ids != info.ids or prepared is not None or lyrics is not None)
+    content_changed = bool(changed_fields or final_ids != info.ids or prepared is not None or lyrics is not None or synced is not None)
     if content_changed:
         fd, name = tempfile.mkstemp(prefix=".tagtxn-", suffix=path.suffix, dir=path.parent)
         os.close(fd)
@@ -242,10 +251,12 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
             shutil.copyfile(path, stage)
             tags.write_file(str(stage), new_tags, prepared, "image/jpeg",
                             ids=final_ids if final_ids != info.ids else None, replace_ids=True,
-                            lyrics=lyrics, fields=changed_fields)
+                            lyrics=lyrics, fields=changed_fields, synced=synced)
             verified = tags.read_file(str(stage))
             if verified.tags != new_tags or (lyrics is not None and verified.lyrics != lyrics.strip()):
                 raise StorageError("저장 검증 실패: 원본 파일을 변경하지 않았습니다")
+            if (synced is not None and verified.synced != search_lyrics.synced_lines(synced)) or (synced is None and verified.synced != info.synced):
+                raise StorageError("시간 동기화 가사 검증 실패")
             if verified.ids != final_ids:
                 raise StorageError("식별자 저장 검증 실패: 원본 파일을 변경하지 않았습니다")
             if prepared is not None and verified.cover != prepared:
@@ -264,9 +275,23 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
             os.chmod(stage, stat.S_IMODE(path.stat().st_mode))
             with stage.open("rb") as stream:
                 os.fsync(stream.fileno())
+            if lrc_needed:
+                asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, revision(stage))
             os.replace(stage, path)
         finally:
             stage.unlink(missing_ok=True)
+    if lrc_needed:
+        if asset is None:
+            asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, expected)
+        try:
+            lyric_assets.finish(asset, root)
+        except Exception as exc:
+            try:
+                lyric_assets.finish(asset, root)
+            except Exception:
+                from . import rename_service
+                rename_service.blocked[str(Path(asset_root or Path(backup_root).parent).resolve())] = str(exc)
+                raise StorageError("음악/LRC 기록 복구가 필요합니다: " + str(path) + ": " + str(exc)) from exc
     rename_error = None
     if rename:
         if not content_changed and revision(path) != expected:
@@ -277,15 +302,24 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
             # and use upstream's paired music+sidecar rename with rollback.
             target = Path(target)
             try:
-                relative = str(target.relative_to(root))
-                alias = {"path": relative, "checksum": digest((relative + folder.name + manifest["tags_sha256"]).encode("utf-8"))}
-                _new_file(folder / ("alias-" + digest(relative.encode("utf-8")) + ".json"), _json_bytes(alias))
-                path = Path(tags.rename_file(str(path), str(target)))
+                if path.with_suffix(".lrc").exists():
+                    from . import rename_service
+                    active_jobs, persist_jobs, active_id = rename_context
+                    row = next(r for r in active_jobs[active_id]["results"] if r["path"] == str(path.relative_to(root)))
+                    row["original"] = describe(path)
+                    rename_service.rename(root, asset_root or Path(backup_root).parent, backup_root, active_jobs, persist_jobs, active_id,
+                                          str(path.relative_to(root)), target.stem, revision(path))
+                    path = target
+                else:
+                    relative = str(target.relative_to(root))
+                    alias = {"path": relative, "checksum": digest((relative + folder.name + manifest["tags_sha256"]).encode("utf-8"))}
+                    _new_file(folder / ("alias-" + digest(relative.encode("utf-8")) + ".json"), _json_bytes(alias))
+                    path = Path(tags.rename_file(str(path), str(target)))
             except Exception as exc:
                 rename_error = "태그는 저장됐으나 이름 변경 실패: " + str(exc)
                 if isinstance(exc, tags.RenameFailed):
                     rename_error += "; 백업 위치: " + exc.backup
-    return {"status": "partial" if rename_error else "saved", "changed": bool(content_changed or (rename_needed and rename_error is None)), "path": str(path.relative_to(root)),
+    return {"status": "partial" if rename_error else "saved", "changed": bool(content_changed or lrc_needed or (rename_needed and rename_error is None)), "path": str(path.relative_to(root)),
             "original": describe(path), "rename_error": rename_error}
 
 

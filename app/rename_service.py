@@ -71,7 +71,7 @@ def validate_name(source, stem):
         raise storage.StorageError("파일명이 허용 길이를 초과합니다")
     if target.name == source.name:
         return target
-    wanted = {folded(target.name), folded(Path(tags.backup_path(str(target))).name)}
+    wanted = {folded(target.name), folded(Path(tags.backup_path(str(target))).name), folded(target.with_suffix(".lrc").name)}
     if any(folded(p.name) in wanted for p in source.parent.iterdir()):
         raise storage.StorageError("동일하거나 대소문자만 다른 파일명 또는 백업 이름이 존재합니다")
     return target
@@ -135,6 +135,14 @@ def finish(record, path, root, backups, jobs, save_jobs):
         storage._verify_backup(new, root, backups)
     elif old_side.exists() or new_side.exists() or new_side.is_symlink():
         raise storage.StorageError("예상하지 못한 동반 백업이 있습니다")
+    if record.get("lrc_sha"):
+        old_lrc, new_lrc = old.with_suffix(".lrc"), new.with_suffix(".lrc")
+        if old_lrc.exists():
+            if old_lrc.is_symlink() or storage.revision(old_lrc) != record["lrc_sha"]:
+                raise storage.StorageError("연결된 LRC 내용 불일치")
+            no_replace(old_lrc, new_lrc)
+        if new_lrc.is_symlink() or not new_lrc.is_file() or storage.revision(new_lrc) != record["lrc_sha"]:
+            raise storage.StorageError("새 이름의 LRC를 확인할 수 없습니다")
     update_jobs(jobs, record["old_path"], record["new_path"], root)
     save_jobs()
     record["status"] = "complete"
@@ -192,12 +200,16 @@ def rename(root, data, backups, jobs, save_jobs, job_id, relative, stem, revisio
         backup_id, tags_sha, side_sha = folder.name, manifest["tags_sha256"], storage.revision(side)
     elif (Path(backups) / storage.digest(relative.encode())).exists():
         raise storage.StorageError("동반 백업이 누락되었습니다. 백업 연결을 확인하세요")
+    lrc = source.with_suffix(".lrc")
+    if lrc.is_symlink() or (lrc.exists() and not lrc.is_file()):
+        raise storage.StorageError("연결된 LRC가 일반 파일이 아닙니다")
+    lrc_sha = storage.revision(lrc) if lrc.exists() else None
     previous = records(data)
     record = {"seq": max((r["seq"] for _, r in previous), default=0) + 1, "id": uuid.uuid4().hex,
               "status": "pending", "root": str(Path(root).resolve()), "old_path": relative,
               "new_path": target.relative_to(root).as_posix(), "revision": revision,
               "identity": identity(source), "backup_id": backup_id, "side_sha": side_sha, "tags_sha": tags_sha,
-              "created_at": time.time()}
+              "created_at": time.time(), "lrc_sha": lrc_sha}
     folder = Path(data) / "renames"
     folder.mkdir(exist_ok=True)
     sync_dir(folder.parent)

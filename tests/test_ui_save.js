@@ -59,7 +59,7 @@ function result(path) {
   run('applyCandidate(editingResult, editingResult.candidates[1])');
   $('chg_title').value = 'User edited';
   $('chg_title').listeners.input();
-  checks.find(check => check.dataset.field === 'artist').checked = false;
+  checks.find(check => check.dataset.field === 'artist').checked = false;checks.find(check => check.dataset.field === 'artist').listeners.change();
   await acceptSave('saveCurrent()');
   const request = sent.at(-1).body;
   assert.equal(request.scope, 'current');
@@ -109,8 +109,8 @@ function result(path) {
   assert.match($('changeSummary').textContent, /제목/);
   $('onlyEmpty').checked=true;run('updateSavePreview()');
   assert.match($('changeSummary').textContent, /텍스트 변경 없음/);
-  $('onlyEmpty').checked=false;
-  checks.find(c=>c.dataset.field==='title').checked=false;run('captureCurrent();updateSavePreview()');
+  $('onlyEmpty').checked=false;run('updateSavePreview()');
+  checks.find(c=>c.dataset.field==='title').checked=false;checks.find(c=>c.dataset.field==='title').listeners.change();run('captureCurrent();updateSavePreview()');
   assert.match($('changeSummary').textContent, /텍스트 변경 없음/);
   run('editingResult._coverId="temporary-cover"; updateSavePreview()');
   assert.match($('changeSummary').textContent, /커버 적용 시도/);
@@ -131,16 +131,16 @@ function result(path) {
   const callsBeforeApply=sent.length;
   run('applyCandidate(editingResult,editingResult.candidates[0])');
   assert.equal($('chg_title').value,'First');
-  assert.match($('candidateFeedback').textContent,/후보 정보가 적용되었습니다/);
-  assert.match($('candidateFeedback').textContent,/파일 저장 전/);
+  assert.equal($('candidateFeedback').hidden,true);
+  assert.equal($('candidateFeedback').hidden,true);
   assert.match($('chg_title').style.boxShadow,/2px/);
   run('applyCandidate(editingResult,editingResult.candidates[0])');
-  assert.match($('candidateFeedback').textContent,/현재 입력값과 같아/);
+  assert.equal($('candidateFeedback').hidden,true);
   assert.equal(sent.length,callsBeforeApply);
   $('onlyEmpty').checked=true;run('applyCandidate(editingResult,editingResult.candidates[0])');
-  assert.match($('candidateFeedback').textContent,/빈 태그만 채우기/);
+  assert.equal($('candidateFeedback').hidden,true);
   run('editingResult._draft=originalValues(editingResult);applyCandidate(editingResult,{id:"empty"})');
-  assert.match($('candidateFeedback').textContent,/적용할 태그 정보가 없는/);
+  assert.equal($('candidateFeedback').hidden,true);
   assert.equal(run('Object.keys(buttonHelp).length'),7);
   assert.match(run('buttonHelp.btnApplyCandidate'),/실제 파일은 변경하지 않습니다/);
   assert.match(run('buttonHelp.btnRestore'),/실제 음악 파일/);
@@ -149,6 +149,7 @@ function result(path) {
     assert.equal(typeof $(id).listeners.focus,'function');
     assert.equal(typeof $(id).listeners.mouseleave,'function');
   }
+  $('onlyEmpty').checked=false;run('updateSavePreview()');
   // Every save entry point must wait for confirmation; cancel/Escape sends nothing.
   for(const mode of ['current','all','filter','checked']){
     $('fileFilter').value='';run('adoptJob(previewJob)');
@@ -203,8 +204,8 @@ function result(path) {
   // Regression: selecting with fill-empty on must retain candidate values for later overwrite.
   $('fileFilter').value='';$('onlyEmpty').checked=true;run('adoptJob(previewJob)');
   run('applyCandidate(editingResult,editingResult.candidates[0]);toggleTagPreview()');
-  assert.equal($('chg_title').value,'First');assert.equal($('cur_title').textContent,'Original');
-  $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_title').textContent,'First');
+  assert.equal($('chg_title').value,'Original');assert.equal($('cur_title').textContent,'Original');
+  $('onlyEmpty').checked=false;run('applyCandidate(editingResult,editingResult.candidates[0]);updateSavePreview()');assert.equal($('cur_title').textContent,'First');
   $('chg_title').value='My manual title';$('chg_title').listeners.input();
   $('onlyEmpty').checked=true;run('updateSavePreview()');assert.equal($('cur_title').textContent,'Original');
   $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_title').textContent,'My manual title');
@@ -237,11 +238,11 @@ function result(path) {
     if(run('previewPath')!==run('editingResult.path'))run('toggleTagPreview()');
     const artistCheck=checks.find(c=>c.dataset.field==='artist');
     for(const emptyOnly of [true,false])for(const checked of [true,false]){
-      $('onlyEmpty').checked=emptyOnly;artistCheck.checked=checked;run('captureCurrent();updateSavePreview()');
+      $('onlyEmpty').checked=emptyOnly;run('updateSavePreview()');if(!artistCheck.disabled){artistCheck.checked=checked;artistCheck.listeners.change();}run('captureCurrent();updateSavePreview()');
       assert.equal($('cur_artist').textContent,!emptyOnly&&checked?'BIGBANG':'빅뱅');
       assert.equal($('cur_artist').style.color,!emptyOnly&&checked?'#c62828':'');
     }
-    artistCheck.checked=true;$('onlyEmpty').checked=false;run('captureCurrent()');
+    $('onlyEmpty').checked=false;run('updateSavePreview()');artistCheck.checked=true;artistCheck.listeners.change();run('captureCurrent()');
     $('chg_artist').value='My manual band';$('chg_artist').listeners.input();
     assert.equal($('cur_artist').textContent,'My manual band');
     $('onlyEmpty').checked=true;run('updateSavePreview()');

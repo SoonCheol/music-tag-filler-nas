@@ -22,7 +22,7 @@ import zlib
 
 import mutagen
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK, TSO2, TSOP, TXXX, UFID, USLT, ID3NoHeaderError
+from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK, TSO2, TSOP, TXXX, UFID, USLT, SYLT, ID3NoHeaderError
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.ogg import OggPage
@@ -130,6 +130,7 @@ class FileInfo:
     cover_mime: str
     ids: Ids = dataclasses.field(default_factory=Ids)
     lyrics: str = ""  # unsynced lyrics (USLT / LYRICS / ©lyr), "" when the file has none
+    synced: list = dataclasses.field(default_factory=list)
 
 
 # ------------------------------------------------------------------ files
@@ -219,7 +220,13 @@ def read_file(path: str) -> FileInfo:
         tags, cover, mime = _read_vorbis(audio.tags)
         cover, mime = _read_vorbis_picture(audio.tags) if cover is None else (cover, mime)
     return FileInfo(os.path.abspath(path), fmt, length, bitrate, rate, tags, cover, mime, _read_ids(fmt, audio.tags),
-                    _read_lyrics(fmt, audio.tags))
+                    _read_lyrics(fmt, audio.tags), _read_synced(fmt, audio.tags))
+
+
+def _read_synced(fmt, tg):
+    if fmt != "MP3" or tg is None:
+        return []
+    return [(str(text), int(ms)) for frame in tg.getall("SYLT") if frame.format == 2 for text, ms in frame.text]
 
 
 # ------------------------------------------------------------------ lyrics
@@ -487,7 +494,7 @@ def _read_mp4(mp4) -> tuple[Tags, bytes | None, str]:
 
 # ------------------------------------------------------------------ writing
 def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: str = "image/jpeg",
-               ids: Ids | None = None, replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
+               ids: Ids | None = None, replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None, synced: str | None = None) -> None:
     """Write the seven text fields; replace the cover when `cover` is given.
     Empty text fields are removed from the file. `ids` adds the identity tags
     (kept as they are when None); replace_ids makes the file hold exactly `ids`.
@@ -503,7 +510,7 @@ def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: st
     fmt, audio = _open(path)
     try:
         if fmt == "MP3":
-            _write_id3(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
+            _write_id3(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields, synced)
         elif fmt == "FLAC":
             _write_flac(audio, tags, cover, cover_mime, ids, replace_ids, lyrics, fields)
         elif fmt == "M4A":
@@ -521,7 +528,7 @@ def write_file(path: str, tags: Tags, cover: bytes | None = None, cover_mime: st
 
 
 def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | None = None,
-               replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None) -> None:
+               replace_ids: bool = False, lyrics: str | None = None, fields: set[str] | None = None, synced: str | None = None) -> None:
     if mp3.tags is None:
         mp3.add_tags()
     id3: ID3 = mp3.tags
@@ -544,6 +551,12 @@ def _write_id3(mp3: MP3, tags: Tags, cover: bytes | None, mime: str, ids: Ids | 
         id3.delall("APIC")
         id3.add(APIC(encoding=0, mime=mime, type=3, desc="Cover", data=cover))
     _set_lyrics("MP3", id3, lyrics)
+    if synced:
+        from .search_lyrics import synced_lines
+        lines = synced_lines(synced)
+        if lines:
+            id3.delall("SYLT")
+            id3.add(SYLT(encoding=1, lang="und", format=2, type=1, desc="LRCLIB", text=lines))
     preserved_sort = [frame for key in ("TSOP", "TSO2") for frame in id3.getall(key)] if ids is None else []
     id3.update_to_v23()
     if ids is not None:
@@ -695,7 +708,7 @@ def rename_target(path: str, tags: Tags) -> str | None:
     target = os.path.join(folder, stem + ext)
     n = 2
     # a leftover backup under that name may be someone's only original: never write over it
-    while os.path.exists(target) or os.path.exists(backup_path(target)):
+    while os.path.exists(target) or os.path.exists(backup_path(target)) or os.path.lexists(os.path.splitext(target)[0] + ".lrc"):
         target = os.path.join(folder, f"{stem} ({n}){ext}")
         n += 1
     return target

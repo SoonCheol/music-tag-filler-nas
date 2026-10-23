@@ -64,10 +64,13 @@ class _Throttle:
         if host in self._windows:
             count, seconds = self._windows[host]
             hist = self._history[host]
+            start = max(start, hist[-1] if hist else start)
             while hist and hist[0] <= start - seconds:
                 hist.popleft()
-            if len(hist) >= count:
+            while len(hist) >= count:
                 start = max(start, hist[0] + seconds)
+                while hist and hist[0] <= start - seconds:
+                    hist.popleft()
             hist.append(start)
         else:
             start += 0.0

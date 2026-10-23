@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 import mutagen
 from functools import wraps
 from collections import OrderedDict
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor, wait, FIRST_COMPLETED
 import io
 import inspect
 from . import storage, search_service, job_service, preferences, rename_service
@@ -113,48 +113,91 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
         files = job_service.collect(MUSIC_ROOT, opts.get("paths") or [sub_path], opts.get("recurse", True), cancel=cancelled)
         previous = job.get("results", []) if resume else []
         retained, pending, missing = job_service.retained_results(MUSIC_ROOT, files, previous, cancel=cancelled)
+        known = {r["path"]: r for r in retained}
+        rows = [known.get(p.relative_to(MUSIC_ROOT.resolve()).as_posix()) or
+                {"path": p.relative_to(MUSIC_ROOT.resolve()).as_posix(), "original": {}, "candidates": [],
+                 "search_phase": "waiting", "scan_auto_selected": False, "file_state": "waiting"} for p in files]
         with storage.OPERATION_LOCK:
-            if job.get("cancel_requested"):
-                job.update(status="cancelled", finished_at=time.time(), current_file="", search_wait_seconds=0, diagnostic="중지 완료")
-                save_jobs()
-                return
-            job.update(status="scanning", total=len(files), results=retained, scanned=len(retained),
-                       missing_paths=missing, diagnostic="", search_wait_seconds=0)
+            job.update(status="scanning", total=len(files), results=rows, scanned=len(retained),
+                       missing_paths=missing, diagnostic="기존 태그 읽는 중", search_wait_seconds=0)
             save_jobs()
+        by_path = {r["path"]: r for r in rows}
+        ready = []
+        last_metadata_save = time.monotonic()
         for path in pending:
             if cancelled.is_set():
                 break
             relative = path.relative_to(MUSIC_ROOT.resolve()).as_posix()
-            with storage.OPERATION_LOCK:
-                if cancelled.is_set():
-                    break
-                job["current_file"] = relative
-                job["search_wait_seconds"] = 0
             try:
                 original = storage.describe(path)
-                if cancelled.is_set():
-                    break
                 artist, title = parse_filename(path)
                 artist, title = original.get("artist") or artist, original.get("title") or title
+                with storage.OPERATION_LOCK:
+                    by_path[relative].update(original=original, parsed={"artist": artist, "title": title})
+                    if time.monotonic() - last_metadata_save >= 2:
+                        save_jobs()
+                        last_metadata_save = time.monotonic()
+                ready.append((path, relative, original, artist, title))
+            except Exception as exc:
+                with storage.OPERATION_LOCK:
+                    by_path[relative].update(error=str(exc), search_phase="error", file_state="error")
+                    job["scanned"] += 1
+                    save_jobs()
+        with storage.OPERATION_LOCK:
+            save_jobs()
+        def lookup(item):
+            path, relative, original, artist, title = item
+            if cancelled.is_set():
+                return None
+            with storage.OPERATION_LOCK:
+                by_path[relative].update(search_phase="running", file_state="running")
+                job["current_file"] = relative
+            try:
                 found = search_service.search(path, original_match.build_query(title, artist), opts.get("country"),
                                               original.get("duration", 0), DATA_ROOT,
                                               use_fingerprint=opts.get("use_fingerprint", True), cancel=cancelled,
                                               on_wait=lambda seconds: job.update(search_wait_seconds=seconds))
                 if cancelled.is_set():
-                    break
+                    return None
                 result = {**found, "path": relative, "original": original,
                           "parsed": {"artist": artist, "title": title}, "lyrics": None,
-                          "lyrics_status": "skipped"}
+                          "lyrics_status": "skipped", "search_phase": "complete"}
                 prepare_result(result)
+                result["scan_auto_selected"] = result["best"] is not None
+                result["file_state"] = file_state(result)
+                if result.get("search_status") in ("error", "failed"):
+                    result.update(search_phase="error", file_state="error")
             except Exception as exc:
-                result = {"path": relative, "error": str(exc), "candidates": [], "original": {}}
+                if cancelled.is_set():
+                    return None
+                result = {"path": relative, "original": original, "candidates": [],
+                          "error": str(exc), "search_phase": "error", "file_state": "error"}
             with storage.OPERATION_LOCK:
                 if cancelled.is_set():
-                    break
-                job["results"].append(result)
-                job["scanned"] = len(job["results"])
+                    return None
+                by_path[relative].update(result)
+                job["scanned"] += 1
+                job["diagnostic"] = ""
                 save_jobs()
+            return relative
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            iterator = iter(ready)
+            futures = set()
+            while not cancelled.is_set() and (futures or iterator is not None):
+                while len(futures) < 3 and iterator is not None and not cancelled.is_set():
+                    item = next(iterator, None)
+                    if item is None:
+                        iterator = None
+                        break
+                    futures.add(pool.submit(lookup, item))
+                if futures:
+                    done, futures = wait(futures, timeout=0.2, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        future.result()
         with storage.OPERATION_LOCK:
+            for row in rows:
+                if row.get("search_phase") == "running":
+                    row.update(search_phase="waiting", file_state="waiting")
             job.update(status="cancelled" if cancelled.is_set() else "done", finished_at=time.time(),
                        current_file="", search_wait_seconds=0,
                        diagnostic="중지 완료" if cancelled.is_set() else "")
@@ -267,10 +310,10 @@ def start_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     target = (root / req.sub_path).resolve()
     if not req.paths and (not target.is_relative_to(root) or not target.is_dir()):
         raise HTTPException(400, "유효한 음악 폴더를 선택하세요")
-    try:
-        job_service.collect(root, req.paths or [req.sub_path], req.recurse)
-    except (storage.StorageError, OSError) as exc:
-        raise HTTPException(400, str(exc))
+    for value in req.paths or [req.sub_path]:
+        selected = root / value
+        if Path(value).is_absolute() or ".." in Path(value).parts or selected.is_symlink() or not selected.resolve().is_relative_to(root) or not selected.exists():
+            raise HTTPException(400, "유효한 음악 파일/폴더를 선택하세요")
     # 중복 방지
     active = get_active_job()
     if active:
@@ -429,6 +472,8 @@ class SaveRequest(BaseModel):
     save_lyrics: bool = True
     only_empty: bool = True
     fill_lyrics: bool = False
+    save_synced: bool = False
+    create_lrc: bool = False
     rename: bool = False
     cover_max_px: Optional[int] = Field(default=None, ge=100, le=1000)
     artist_name_preference: Literal["original", "latin"] = "original"
@@ -448,7 +493,7 @@ _lyrics_lock = threading.Lock()
 
 
 def lyric_response(entry):
-    return {key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "message")}
+    return {key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "synced", "message")}
 
 
 def remember_lyrics(key, found, searched=True):
@@ -458,7 +503,7 @@ def remember_lyrics(key, found, searched=True):
                 original_lyrics.CONFLICT: "검색된 가사가 서로 일치하지 않아 사용할 수 없습니다.",
                 original_lyrics.NEED_TAGS: "가사 검색에 제목과 가수가 필요합니다."}
     entry = {"key": key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
-             "lyrics": text, "message": messages.get(found.status, "가사 검색 오류가 발생했습니다.") if status == "error" else "",
+             "lyrics": text, "synced": getattr(found, "synced", "") if text else "", "message": messages.get(found.status, "가사 검색 오류가 발생했습니다.") if status == "error" else "",
              "expires": time.monotonic() + (3600 if status == "found" else 30 if status == "not_found" else 5)}
     with _lyrics_lock:
         _lyrics_cache[key] = entry
@@ -596,8 +641,6 @@ def research_file(job_id: str, request: SearchRequest):
         if job_id not in jobs:
             raise HTTPException(404, "job not found")
         job = jobs[job_id]
-        if job.get("status") in ("queued", "scanning", "cancelling"):
-            raise HTTPException(409, "스캔을 완료하거나 중지한 후 재검색하세요")
         result = next((r for r in job.get("results", []) if r.get("path") == request.path), None)
         if result is None:
             raise HTTPException(400, "이 작업에 속한 파일이 아닙니다")
@@ -606,6 +649,8 @@ def research_file(job_id: str, request: SearchRequest):
             original = storage.describe(path)
         except (storage.StorageError, OSError, original_tags.UnsupportedFile) as exc:
             raise HTTPException(400, str(exc))
+        if result.get("search_phase") in ("waiting", "running"):
+            raise HTTPException(409, "이 곡의 검색이 끝난 후 재검색하세요")
         if request.expected_revision and request.expected_revision != original["revision"]:
             raise HTTPException(409, "파일이 변경되었습니다. 다시 스캔하세요")
         generation = uuid.uuid4().hex
@@ -627,7 +672,7 @@ def research_file(job_id: str, request: SearchRequest):
 
 @app.get("/api/jobs/{job_id}/cover/{selection_id}")
 @path_operation("앨범 이미지 검색")
-def candidate_cover(job_id: str, selection_id: str, path: str):
+def candidate_cover(job_id: str, selection_id: str, path: str, force: bool = False):
     if job_id not in jobs:
         raise HTTPException(404, "job not found")
     result = next((r for r in jobs[job_id].get("results", []) if r.get("path") == path), None)
@@ -636,14 +681,17 @@ def candidate_cover(job_id: str, selection_id: str, path: str):
     candidate = next((c for c in result.get("candidates", []) if candidate_id(c) == selection_id), None)
     if candidate is None:
         raise HTTPException(404, "이 파일의 검색 후보가 아닙니다")
-    data, errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country)
+    data, errors = search_service.fetch_cover(candidate, result.get("country") or search_service.configuration(DATA_ROOT).country, force=force)
     if data is None:
-        raise HTTPException(404, detail={"message": "표지 조회 실패", "errors": errors})
-    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
+        raise HTTPException(404, detail={"message": "표지 조회 실패", "errors": errors,
+                                            "state": "none" if all(e.get("code") == "cover_not_found" for e in errors) else "error"})
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store" if force else "private, max-age=600"})
 
 
 def file_state(result):
     stored = result.get("stored_saved", result.get("last_save", {}).get("status") in ("saved", "partial"))
+    if not stored and result.get("search_phase") in ("waiting", "running", "error"):
+        return result["search_phase"]
     return "saved" if stored else "auto" if result.get("scan_auto_selected", result.get("auto_apply", False)) else "review"
 
 
@@ -721,7 +769,7 @@ def save_one(result, item, request, lyric_context=None):
     uploaded = preferences.get_cover(result.get("job_id", ""), item.cover_id) if request.save_cover and item.cover_id else None
     if uploaded is not None:
         wants_cover = not (only_empty and current.cover is not None)
-    has_real_lyrics = bool(current.lyrics.strip() and not original_lyrics.marker_only(current.lyrics))
+    has_real_lyrics = bool(current.synced or (current.lyrics.strip() and (only_empty or not original_lyrics.marker_only(current.lyrics))))
     choice = selected_lyrics(result.get("job_id", ""), item.path, item.expected_revision, item.lyrics_id, final["title"], final["artist"]) if request.save_lyrics and item.lyrics_id else None
     # New UI sends an explicit checkbox: only previously searched lyrics may save.
     # Old API clients without that control retain their automatic missing-lyrics option.
@@ -754,8 +802,11 @@ def save_one(result, item, request, lyric_context=None):
         if found.status == original_lyrics.FOUND:
             lyrics = found.text
         choice = remember_lyrics((str(MUSIC_ROOT.resolve()), result.get("job_id", ""), item.path, item.expected_revision, final["title"], final["artist"]), found, actually_searched)
+    synced = choice.get("synced") if choice and choice["status"] == "found" and request.save_lyrics and not (only_empty and (has_real_lyrics or current.synced)) else None
     outcome = storage.save(path, MUSIC_ROOT.resolve(), BACKUP_ROOT, values, item.fields,
-                           only_empty, item.expected_revision, cover, lyrics, request.rename, ids, replace_lyrics=bool(manual_lyrics))
+                           only_empty, item.expected_revision, cover, lyrics, request.rename, ids, replace_lyrics=bool(manual_lyrics),
+                           synced=synced if request.save_synced else None, lrc=synced if request.create_lrc else None,
+                           asset_root=DATA_ROOT, rename_context=(jobs, save_jobs, result.get("job_id", "")))
     if choice:
         outcome["lyrics_search"] = lyric_response(choice)
     outcome["lyrics_status"] = lyrics_status
@@ -1016,7 +1067,7 @@ def file_lyrics(path: str, v: Optional[str] = None):
         if v and storage.revision(target) != v:
             raise HTTPException(409, "파일이 변경되었습니다. 다시 확인하세요")
         info = original_tags.read_file(str(target))
-        return {"lyrics": info.lyrics}
+        return {"lyrics": info.lyrics or "\n".join(text for text, _ in info.synced)}
     except (storage.StorageError, OSError) as exc:
         raise HTTPException(400, str(exc))
 
@@ -1143,7 +1194,10 @@ def recover_filename_changes():
     with storage.OPERATION_LOCK:
         try:
             rename_service.recover(MUSIC_ROOT.resolve(), DATA_ROOT, BACKUP_ROOT, jobs, save_jobs)
-        except storage.StorageError:
+            from . import lyric_assets
+            lyric_assets.recover(MUSIC_ROOT.resolve(), DATA_ROOT)
+        except storage.StorageError as exc:
+            rename_service.blocked[str(DATA_ROOT.resolve())] = str(exc)
             # Reads remain available; path-changing operations fail closed until repaired.
             pass
 
@@ -1181,3 +1235,54 @@ def rename_conflict(fallback=None, include_saves=True):
 @app.get("/api/background-operations")
 def background_operations():
     return {"operations": operation_snapshot()}
+
+
+class CandidateLyricsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    candidate_id: str
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    force: bool = False
+
+
+_candidate_lyrics_cache = OrderedDict()
+_candidate_lyrics_pending = {}
+
+
+@app.post("/api/jobs/{job_id}/candidate-lyrics")
+@path_operation("가사 검색")
+def candidate_lyrics(job_id: str, request: CandidateLyricsRequest):
+    with storage.OPERATION_LOCK:
+        row = next((r for r in jobs.get(job_id, {}).get("results", []) if r.get("path") == request.path), None)
+        if row is None or row.get("original", {}).get("revision") != request.expected_revision:
+            raise HTTPException(409, "파일 또는 작업 정보가 변경되었습니다")
+        candidate = next((c for c in row.get("candidates", []) if candidate_id(c) == request.candidate_id), None)
+        if candidate is None:
+            raise HTTPException(404, "이 파일의 후보가 아닙니다")
+        title, artist = candidate.get("title", ""), candidate.get("artist", "")
+        length = row.get("original", {}).get("duration") or candidate.get("duration", 0)
+    key = (str(MUSIC_ROOT.resolve()), job_id, request.path, request.expected_revision, request.candidate_id)
+    with _lyrics_lock:
+        cached = _candidate_lyrics_cache.get(key)
+        if cached and not request.force and cached[0] > time.monotonic():
+            return cached[1]
+        future = _candidate_lyrics_pending.get(key)
+        owner = future is None
+        if owner:
+            future = Future()
+            _candidate_lyrics_pending[key] = future
+    if not owner:
+        return future.result()
+    try:
+        found = original_lyrics.find(title, artist, length)
+        status = "found" if found.status == original_lyrics.FOUND and found.text.strip() else "none" if found.status in (original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error"
+        value = {"status": status, "has_lyrics": status == "found"}
+    except Exception:
+        value = {"status": "error", "has_lyrics": False}
+    with _lyrics_lock:
+        _candidate_lyrics_cache[key] = (time.monotonic() + (600 if value["status"] == "found" else 30 if value["status"] == "none" else 5), value)
+        while len(_candidate_lyrics_cache) > 128:
+            _candidate_lyrics_cache.popitem(last=False)
+        _candidate_lyrics_pending.pop(key, None)
+        future.set_result(value)
+    return value

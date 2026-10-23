@@ -16,6 +16,8 @@ class Preferences(BaseModel):
     recurse: bool = True
     only_empty: bool = True
     fill_lyrics: bool = False
+    save_synced: bool = False
+    create_lrc: bool = False
     rename: bool = False
     include_ids: bool = False
     artist_name_preference: Literal["original", "latin"] = "original"

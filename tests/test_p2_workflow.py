@@ -87,7 +87,9 @@ class P2Tests(unittest.TestCase):
         with patch.object(search_service, "search", side_effect=cancel):
             main.scan_job("test", "", {}, False)
         self.assertEqual(main.jobs["test"]["status"], "cancelled")
-        self.assertEqual(main.jobs["test"]["results"], [])
+        self.assertEqual(len(main.jobs["test"]["results"]), 1)
+        self.assertEqual(main.jobs["test"]["results"][0]["search_phase"], "waiting")
+        self.assertEqual(main.jobs["test"]["results"][0]["candidates"], [])
 
     def test_force_cannot_bypass_cancelling_and_concurrent_start(self):
         self.copy()
@@ -306,7 +308,7 @@ class P2Tests(unittest.TestCase):
     def test_option_defaults_and_bounds(self):
         value = preferences.Preferences().model_dump()
         self.assertEqual(value, {"country": "KR", "recurse": True, "only_empty": True,
-                                 "fill_lyrics": False, "rename": False, "include_ids": False,
+                                 "fill_lyrics": False, "save_synced": False, "create_lrc": False, "rename": False, "include_ids": False,
                                  "artist_name_preference": "original", "cover_max_px": 1000})
         for country in ("KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"):
             self.assertEqual(preferences.Preferences(country=country).country, country)

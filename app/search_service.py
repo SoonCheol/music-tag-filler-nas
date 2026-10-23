@@ -220,9 +220,11 @@ def prepare_image(data):
     return tags.prepare_cover(data)[0]
 
 
-def fetch_cover(value, country="US", cancel=None, on_wait=None):
+def fetch_cover(value, country="US", cancel=None, on_wait=None, force=False):
     key = (candidate_id(value), country)
     with _cover_lock:
+        if force:
+            _cover_cache.pop(key, None)
         pending = _cover_pending.get(key)
         owner = pending is None
         if owner:

@@ -62,7 +62,7 @@ def retained_results(root, files, previous, cancel=None):
         check_cancel(cancel)
         relative = path.relative_to(Path(root).resolve()).as_posix()
         old = previous.get(relative)
-        if (old and not old.get("error") and old.get("original", {}).get("revision")
+        if (old and old.get("search_phase") not in ("waiting", "running", "error") and not old.get("error") and old.get("original", {}).get("revision")
                 == storage.revision(path)):
             retained.append(old)
         else:

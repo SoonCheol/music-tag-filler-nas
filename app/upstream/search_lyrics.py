@@ -18,8 +18,7 @@ noticed until the song plays:
   Near-identical copies count as one source; sources that tell the same text
   form a camp; the largest camp wins, and a tie means "do not add" (CONFLICT).
 
-Files whose title says instrumental are not looked up at all. Only the plain
-(unsynced) text is returned; timed lyrics are used for the check above.
+Files whose title says instrumental are not looked up at all. Plain text and the validated timed lyrics are returned separately.
 Nothing the server sends is trusted to have the documented types.
 """
 from __future__ import annotations
@@ -79,6 +78,7 @@ class LyricsResult:
     status: str
     text: str = ""  # plain lyrics when status == FOUND
     record_id: int | None = None
+    synced: str = ""
 
 
 def _nfkc(text: str) -> str:
@@ -357,5 +357,28 @@ def find(title: str, artist: str, length: float, *, cancel: threading.Event | No
     status, record = pick(records, title, artist, length)
     if status == FOUND and record is not None:
         rid = record.get("id")
-        return LyricsResult(FOUND, record_text(record), rid if isinstance(rid, int) and not isinstance(rid, bool) else None)
+        synced = clean_text(_str(record.get("syncedLyrics")))
+        try:
+            if not synced_lines(synced):
+                synced = ""
+        except ValueError:
+            synced = ""
+        return LyricsResult(FOUND, record_text(record), rid if isinstance(rid, int) and not isinstance(rid, bool) else None, synced)
     return LyricsResult(status)
+
+
+def synced_lines(lrc: str) -> list[tuple[str, int]]:
+    """Keep only explicit, valid LRC timestamps; SYLT format 2 uses milliseconds."""
+    if len(lrc) > MAX_TEXT_CHARS:
+        raise ValueError("LRC 내용이 너무 깁니다")
+    result = []
+    for line in clean_text(lrc).splitlines():
+        text = _LEADING_TAGS_RE.sub("", line).strip()
+        for minute, second in _TIMESTAMP_RE.findall(line):
+            if float(second) >= 60:
+                raise ValueError("잘못된 LRC 초 값")
+            milliseconds = round((int(minute) * 60 + float(second)) * 1000)
+            if milliseconds > 0xffffffff:
+                raise ValueError("LRC 시간 범위 초과")
+            result.append((text, milliseconds))
+    return sorted(result, key=lambda item: item[1])

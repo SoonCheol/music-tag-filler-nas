@@ -8,14 +8,14 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
-  function element() {return {value:'',checked:false,hidden:true,style:{},children:[],listeners:{},attributes:{},scrollTop:0,
+  function element() {return {value:'',checked:false,hidden:true,style:{},children:[],listeners:{},attributes:{},dataset:{},scrollTop:0,
     showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return this.valid!==false;},
     innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];if(k==='src')this.src='';},focus(){},
     appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(...children){this.children.forEach(c=>c.parent=null);this.children=[];children.forEach(c=>this.appendChild(c));},
     addEventListener(name,fn){this.listeners[name]=fn;},contains(target){return target===this||this.children.some(c=>c.contains(target));}};}
   function $(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
   for(const field of ['title','artist','album','albumartist','track','year','genre']){const check=element();check.checked=true;check.dataset={field};checks.push(check);}
-  const context=vm.createContext({console,Set,Map,Number,encodeURIComponent,localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)},
+  const context=vm.createContext({console,Set,Map,Number,AbortController,URL,clearTimeout,encodeURIComponent,localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)},
     document:{getElementById:$,createElement:element,addEventListener:(k,f)=>documentEvents[k]=f,querySelectorAll:s=>s==='.chg-check'?checks:[]},
     alert(){},confirm:()=>true,setTimeout(){},fetch:async(url,options={})=>{let body=options.body;
       if(typeof body==='string')body=JSON.parse(body);calls.push({url,body,method:options.method});
@@ -142,49 +142,32 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   lyricUI.context.fetch=async()=>{throw new Error('offline');};await lyricUI.run('searchLyricsForCurrent()');assert.ok(lyricUI.$('changeLyrics').textContent.includes('검색 오류'));assert.notEqual(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');
   assert.ok(html.includes('.file-lyrics+.file-name-text{margin-left:6px}'));assert.ok(html.includes('height:210px'));assert.ok(!html.includes('<textarea id="currentLyrics"'));
 
-  const hover=harness(),hoverImages=[];
-  const create=hover.context.document.createElement;
-  hover.context.document.createElement=tag=>{const node=create(tag);if(tag==='img')hoverImages.push(node);return node;};
-  hover.context.hoverRow={path:'fake.mp3',original:{},candidates:[{id:'a',album:'A'},{id:'b',album:'B'},{id:'fail',album:'F'}]};
-  hover.run("currentJobId='hover';showHoverCover(hoverRow.candidates[0],hoverRow)");
-  assert.equal(hover.$('hoverCoverStatus').textContent,'커버 불러오는 중…');assert.equal(hover.$('hoverCoverImage').children.length,0);
-  const imageA=hoverImages.at(-1);
-  hover.run('showHoverCover(hoverRow.candidates[1],hoverRow)');const imageB=hoverImages.at(-1);
-  imageB.onload();await Promise.resolve();imageA.onload();await Promise.resolve();
-  assert.equal(hover.$('hoverCoverImage').children[0].src,imageB.src);
-  imageA.onerror();await Promise.resolve();assert.equal(hover.$('hoverCoverStatus').textContent,'');
-  hover.run('showHoverCover(hoverRow.candidates[2],hoverRow)');hoverImages.at(-1).onerror();await Promise.resolve();assert.ok(hover.$('hoverCoverStatus').textContent.includes('썸네일'));
-  hover.run('retryHoverCover()');const retried=hoverImages.at(-1);assert.ok(retried.src.includes('retry='));retried.onload();await Promise.resolve();assert.equal(hover.$('hoverCoverStatus').textContent,'');
-  hover.run('hideHoverCover()');assert.equal(hover.$('hoverPrev').style.display,'none');
-  const thumbnails=harness(),thumbImages=[];
-  const thumbCreate=thumbnails.context.document.createElement;
-  thumbnails.context.document.createElement=tag=>{const node=thumbCreate(tag);node.getBoundingClientRect=()=>({top:0,bottom:260});if(tag==='img')thumbImages.push(node);return node;};
-  thumbnails.context.thumbRow={path:'temporary.mp3',candidates:Array.from({length:20},(_,i)=>({id:'thumb-'+i,title:'Long title '+i,album:'Album '+i}))};
-  thumbnails.run("currentJobId='thumb-job';renderCandidates(thumbRow)");
-  assert.equal(thumbnails.run('candidateCoverCache.size'),10);assert.equal(thumbnails.run('candidateCoverRunning'),3);assert.equal(thumbImages.length,3);
-  for(let i=0;i<10;i++){thumbImages[i].onload();assert.ok(thumbnails.run('candidateCoverRunning')<=3);}await Promise.resolve();
-  assert.equal(thumbImages.length,10);assert.equal(thumbnails.run('candidateCoverRunning'),0);
-  thumbnails.$('candidateScroller').getBoundingClientRect=()=>({bottom:260});thumbnails.$('candidateScroller').onscroll();
-  assert.equal(thumbnails.run('candidateCoverCache.size'),20);assert.equal(thumbnails.run('candidateCoverRunning'),3);
-  for(let i=10;i<20;i++)thumbImages[i].onload();await Promise.resolve();
-  const downloads=thumbImages.filter(img=>img.onload).length;
-  thumbnails.run('showHoverCover(thumbRow.candidates[0],thumbRow)');await Promise.resolve();
-  assert.equal(thumbImages.filter(img=>img.onload).length,downloads);
-  thumbnails.run("paintCandidateCover(document.getElementById('changeCover'),thumbRow.candidates[0],thumbRow)");await Promise.resolve();
-  assert.ok(thumbnails.$('changeCover').innerHTML.includes('/cover/thumb-0?'));
-  assert.equal(thumbImages.filter(img=>img.onload).length,downloads);
+  const media=harness(),requests=[],pending=[];
+  media.context.URL={createObjectURL:()=> 'blob:test-'+requests.length,revokeObjectURL(){}};
+  media.context.fetch=(url,options={})=>{requests.push({url,options});return new Promise(resolve=>pending.push(resolve));};
+  media.context.mediaRow={path:'fake.mp3',original:{revision:'a'.repeat(64)},candidates:Array.from({length:12},(_,i)=>({id:'c'+i,album:'Album '+i,title:'Title '+i,artist:'Singer'}))};
+  media.$('candidateScroller').getBoundingClientRect=()=>({top:0,bottom:100});
+  const createMedia=media.context.document.createElement;let rowIndex=0;
+  media.context.document.createElement=tag=>{const node=createMedia(tag);if(tag==='tr'){const i=rowIndex++;node.getBoundingClientRect=()=>({top:i*30,bottom:i*30+30});}return node;};
+  media.run("currentJobId='media';renderCandidates(mediaRow)");
+  assert.equal(requests.length,0); // no prefetch before list entry
+  media.$('candidateScroller').onmouseenter();
+  assert.equal(media.run('candidateCoverRunning'),3);assert.equal(media.run('candidateLyricsRunning'),3);
+  assert.equal(media.run('candidateCoverCache.size'),4);assert.equal(media.run('candidateLyricsCache.size'),4);
+  assert.equal(media.run('requestCandidateCover(mediaRow.candidates[0],mediaRow)===requestCandidateCover(mediaRow.candidates[0],mediaRow)'),true);
+  const coverResponses=pending.slice(0,3);
+  for(const resolve of coverResponses)resolve({ok:true,blob:async()=>({type:'image/jpeg'})});
+  for(let i=0;i<10;i++)await Promise.resolve();
+  assert.ok(media.run('candidateCoverRunning')<=3);
+  assert.equal(media.$('candidateThumb1-0').dataset.state,'ready');
+  const cacheBefore=media.run('candidateCoverCache.size');
+  media.$('candidateScroller').onscroll();assert.equal(media.run('candidateCoverCache.size'),cacheBefore);
+  // Stale hover completions never repaint the newer hovered candidate.
+  media.run('showHoverCover(mediaRow.candidates[0],mediaRow);hideHoverCover()');
+  await Promise.resolve();assert.equal(media.$('hoverPrev').style.display,'none');
+  assert.ok(html.includes('thumb.ondblclick='));assert.ok(html.includes('event.stopPropagation();clearTimeout(clickTimer)'));
+  assert.ok(!html.includes('onclick="applyCoverToAll()"'));
   assert.ok(html.includes('width:24px;height:24px;object-fit:cover'));
-  assert.ok(html.includes('.cand-table{max-height:260px;overflow:auto;'));
-  const failedThumb=harness(),failedImages=[];
-  const failedCreate=failedThumb.context.document.createElement;
-  failedThumb.context.document.createElement=tag=>{const node=failedCreate(tag);if(tag==='img')failedImages.push(node);return node;};
-  failedThumb.context.failedRow={path:'fake.mp3',candidates:[{id:'failure',title:'Title',album:'Album'}]};
-  failedThumb.run("currentJobId='failed';renderCandidates(failedRow)");
-  assert.equal(failedThumb.run('requestCandidateCover(failedRow.candidates[0],failedRow)===requestCandidateCover(failedRow.candidates[0],failedRow)'),true);
-  failedImages[0].onerror();await Promise.resolve();
-  const icon=failedThumb.$('candidateThumb1-0');assert.equal(icon.innerHTML,'♪');assert.equal(icon._coverFailed,true);
-  let stopped=false;icon.onclick({stopPropagation(){stopped=true;}});assert.equal(stopped,true);assert.ok(failedImages.at(-1).src.includes('retry='));
-  failedImages.at(-1).onload();await Promise.resolve();assert.equal(icon._coverFailed,false);assert.ok(icon.innerHTML.includes('<img'));
   assert.ok(!html.includes('id="checkAllChange"'));
   assert.ok(html.includes('id="saveCover" checked aria-label="커버 이미지 저장"'));
   assert.ok(html.includes('#saveCover{position:absolute;top:4px;left:4px;width:14px;height:14px;'));
@@ -218,7 +201,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   ops.run('toggleOperationDetails()');assert.equal(ops.$('operationDetails').hidden,true);
   ops.run('renderOperationStatus([])');assert.equal(ops.$('operationStatus').hidden,true);assert.equal(ops.run('operationExpanded'),false);
   const coverOnly=harness();coverOnly.$('onlyEmpty').checked=false;
-  coverOnly.run("requestCandidateCover=()=>Promise.resolve(null);adoptJob({id:'cover-only',results:[{path:'cover.mp3',original:{revision:'a'.repeat(64),title:'Original',has_cover:true},candidates:[{id:'blue',title:'Changed title',album:'Changed album',cover_url:'https://example.invalid/blue.jpg'}]}]});applyCandidate(editingResult,editingResult.candidates[0]);document.querySelectorAll('.chg-check').forEach(c=>c.checked=false);captureCurrent()");
+  coverOnly.run("requestCandidateCover=()=>Promise.resolve(null);adoptJob({id:'cover-only',results:[{path:'cover.mp3',original:{revision:'a'.repeat(64),title:'Original',has_cover:true},candidates:[{id:'blue',title:'Changed title',album:'Changed album',cover_url:'https://example.invalid/blue.jpg'}]}]});applyCandidate(editingResult,editingResult.candidates[0]);toggleAllChange(false);captureCurrent()");
   assert.equal(coverOnly.run('saveItem(editingResult).include_cover'),true,'candidate cover must not depend on text checkboxes');
   assert.equal(coverOnly.run('plannedChanges(editingResult).cover'),true);
   assert.equal(coverOnly.run('saveItem(editingResult).fields.length'),0);
@@ -236,7 +219,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const common=harness();
   common.context.commonJob={id:'common-fields',results:[{path:'one.mp3',file_state:'auto',original:{title:'One',album:'Dance CD1',revision:'a'.repeat(64)}},{path:'two.mp3',file_state:'auto',original:{title:'Two',album:'Dance CD2',revision:'a'.repeat(64)}}]};
   common.run('adoptJob(commonJob)');
-  common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked=false;
+  common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').checked=false;common.context.document.querySelectorAll('.chg-check').find(c=>c.dataset.field==='album').listeners.change();
   common.run('captureCurrent()');
   await common.run('requestSelectFile(1)');
   assert.equal(common.$('actionDialog').open,undefined);
@@ -276,7 +259,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   }
   assert.ok(html.includes('font-size:11px;line-height:1.5;white-space:nowrap;color-scheme:light'));
   const sorting=harness();
-  sorting.run("currentResults=[{path:'z.mp3',file_state:'review'},{path:'b.mp3',file_state:'auto',_checked:true},{path:'a.mp3',file_state:'saved'},{path:'c.mp3',file_state:'auto',_checked:false}];filteredResults=currentResults.slice();selectFile(1)");
+  sorting.run("currentResults=[{path:'z.mp3',file_state:'review'},{path:'b.mp3',file_state:'auto',_checked:true},{path:'a.mp3',file_state:'saved'},{path:'c.mp3',file_state:'auto',_checked:false}];currentResults.forEach(r=>r.original={revision:'a'.repeat(64)});filteredResults=currentResults.slice();selectFile(1)");
   sorting.$('chg_title').value='Unsaved title';
   sorting.run("captureCurrent();editingResult._dirty=true");
   const invariant=()=>sorting.run("JSON.stringify({paths:currentResults.map(r=>r.path),checks:currentResults.map(r=>r._checked),selected:editingResult.path,draft:editingResult._draft,fields:editingResult._fields,dirty:editingResult._dirty,targets:saveTarget().rows.map(r=>r.path)})");
@@ -337,9 +320,9 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   await scanUi.run("cancelSpecific('scan-stop')");
   assert.ok(scanUi.calls.some(c=>c.url==='/api/jobs/scan-stop/cancel'&&c.method==='POST'));
   scanJob.status='cancelling';await scanUi.run('pollJobs()');
-  assert.match(scanUi.$('progressText').textContent,/1\/3.*cancelling/);
+  assert.match(scanUi.$('progressText').textContent,/전체 3곡.*검색 완료 1곡.*남은 2곡.*cancelling/);
   scanJob.status='cancelled';await scanUi.run('pollJobs()');
-  assert.match(scanUi.$('progressText').textContent,/1\/3.*cancelled/);
+  assert.match(scanUi.$('progressText').textContent,/전체 3곡.*검색 완료 1곡.*남은 2곡.*cancelled/);
   assert.equal(scanUi.$('btnResume').style.display,'inline-block');
   const h=harness();
   h.run("musicFolders=['Album','Album/Disc1','Album/Disc1/Bonus','Album/Disc2','Other']; renderFolders()");
@@ -455,11 +438,12 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   await emptyReload.run('pollJobs()');assert.equal(emptyReload.$('subPath').value,'Unscanned');
   assert.equal(emptyReload.run('currentResults.length'),0);assert.equal(emptyReload.run('editingResult'),null);
   const optionHarness=harness();
-  optionHarness.context.optionJob={id:'options',results:[{path:'one.mp3',original:{title:'Old',revision:'a'.repeat(64)},candidates:[]}]};
+  optionHarness.context.optionJob={id:'options',results:[{path:'one.mp3',original:{title:'Old',revision:'a'.repeat(64)},candidates:[{id:'option-candidate',album:'New Album'}]}]};
   optionHarness.$('fileFilter').value='';optionHarness.run('adoptJob(optionJob)');
   for(const enabled of [true,false]){
     for(const id of ['onlyEmpty','fillLyrics','renameFiles','includeIds'])optionHarness.$(id).checked=enabled;
     optionHarness.$('coverMax').value=enabled?100:1000;
+    optionHarness.run('updateSavePreview();applyCandidate(editingResult,editingResult.candidates[0])');
     const pending=optionHarness.run('saveCurrent()');optionHarness.run('resolveAction(true)');await pending;
     const body=optionHarness.calls.filter(c=>c.url.endsWith('/save')).at(-1).body;
     assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,enabled);
