@@ -8,6 +8,9 @@ machine; no audio file is uploaded anywhere.
 from __future__ import annotations
 
 import collections
+import copy
+import json
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 from contextlib import contextmanager
 import threading
 import time
@@ -249,6 +252,124 @@ def get_json(url: str, params: dict | None = None, *, on_wait: WaitCallback | No
     except ValueError as exc:
         raise NetworkError("bad json") from exc
     return data if isinstance(data, dict) else {}
+
+
+
+class _SearchFlight:
+    def __init__(self):
+        self.future = Future()
+        self.cancel = threading.Event()
+        self.users = 0
+        self.started = time.monotonic()
+
+
+class _SearchCache:
+    """Bounded raw-response LRU with independent subscribers and fresh generations."""
+    def __init__(self, max_entries=500, ttl=86400.0, empty_ttl=60.0, wait_timeout=600.0):
+        self.max_entries, self.ttl, self.empty_ttl = max_entries, ttl, empty_ttl
+        self.wait_timeout = wait_timeout
+        self._lock = threading.Lock()
+        self._values = collections.OrderedDict()
+        self._pending = {}
+
+    def get(self, key, loader, *, empty, host, cancel=None, force=False):
+        if cancel is not None and cancel.is_set():
+            raise NetworkError("cancelled")
+        _metric(host, "cache_lookups", 1)
+        if force:
+            _metric(host, "cache_forced", 1)
+        with self._lock:
+            cached = self._values.get(key)
+            if not force and cached is not None:
+                if cached[0] > time.monotonic():
+                    self._values.move_to_end(key)
+                    _metric(host, "cache_hits", 1)
+                    return copy.deepcopy(cached[1])
+                del self._values[key]
+            # A refresh must never join an older ordinary request. Its flight
+            # replaces the publication token; old flights can finish for their
+            # own subscribers but cannot overwrite newer cache generations.
+            flight = None if force else self._pending.get(key)
+            if flight is not None and flight.future.done():
+                flight = None
+            owner = flight is None
+            if owner:
+                flight = _SearchFlight()
+                self._pending[key] = flight
+            flight.users += 1
+        if owner:
+            _metric(host, "cache_misses", 1)
+            metrics = getattr(_timing, "metrics", None)
+            def fetch():
+                try:
+                    with measure_network(metrics):
+                        value = loader(flight.cancel)
+                    lifetime = self.empty_ttl if empty(value) else self.ttl
+                    with self._lock:
+                        if flight.cancel.is_set():
+                            raise NetworkError("cancelled")
+                        if self._pending.get(key) is flight:
+                            self._values[key] = (time.monotonic() + lifetime, copy.deepcopy(value))
+                            self._values.move_to_end(key)
+                            while len(self._values) > self.max_entries:
+                                self._values.popitem(last=False)
+                    flight.future.set_result(value)
+                except BaseException as exc:
+                    flight.future.set_exception(exc)
+                finally:
+                    with self._lock:
+                        if self._pending.get(key) is flight:
+                            del self._pending[key]
+            threading.Thread(target=fetch, name="search-response", daemon=True).start()
+        else:
+            _metric(host, "shared_requests", 1)
+        started = time.perf_counter()
+        try:
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise NetworkError("cancelled")
+                if time.monotonic() - flight.started >= self.wait_timeout:
+                    raise NetworkError("shared search timeout")
+                try:
+                    return copy.deepcopy(flight.future.result(timeout=0.1))
+                except FutureTimeout:
+                    if flight.future.done():
+                        return copy.deepcopy(flight.future.result())
+                    continue
+        finally:
+            if not owner:
+                _metric(host, "shared_wait_seconds", time.perf_counter() - started)
+            with self._lock:
+                flight.users -= 1
+                if not flight.users and not flight.future.done():
+                    flight.cancel.set()
+                    if self._pending.get(key) is flight:
+                        del self._pending[key]
+
+
+_search_caches = {host: _SearchCache() for host in ("itunes.apple.com", "musicbrainz.org")}
+
+
+def search_json(url: str, params: dict, *, on_wait=None, cancel=None, force=False):
+    """Cache only validated song-search JSON, before parsing/scoring candidates.
+
+    No normalization: query punctuation, Live/Remix/Remaster text, storefront,
+    limits and every other actual request parameter remain part of the key.
+    Covers, lyrics and fingerprint requests continue through their own paths.
+    """
+    host = _host(url)
+    key = (url, json.dumps(params, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
+    field = "results" if host == "itunes.apple.com" else "recordings"
+    def waiting(seconds):
+        if on_wait is not None and (cancel is None or not cancel.is_set()):
+            on_wait(seconds)
+    def load(shared_cancel):
+        value = get_json(url, params, on_wait=waiting if on_wait else None, cancel=shared_cancel)
+        if not isinstance(value.get(field), list) or any(not isinstance(row, dict) for row in value[field]):
+            raise NetworkError("bad json search results")
+        return value
+    return _search_caches[host].get(key, load, empty=lambda value: not value[field],
+                                     host=host, cancel=cancel, force=force)
 
 
 def get_bytes(url: str, *, max_bytes: int = 20 * 1024 * 1024, on_wait: WaitCallback | None = None,

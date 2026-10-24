@@ -1117,7 +1117,7 @@ async function manualSearch(){
   const hadDraft=r._selection==='edit'||r._selection==='manual';const fields=[...r._fields];
   searching=true;$('statusLine').textContent=mode==='sound'?'음향 지문 검색 중…':'재검색 중…';
   try{
-    const data=await api('/api/jobs/'+currentJobId+'/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:r.path,query,country,mode,use_fingerprint:true,expected_revision:r._draftRevision||null})});
+    const data=await api('/api/jobs/'+currentJobId+'/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:r.path,query,country,mode,use_fingerprint:mode==='sound',expected_revision:r._draftRevision||null})});
     Object.assign(r,data);r._candidateFeedback=null;r._appliedFields=[];
     if(hadDraft){if(!r.candidates.some(c=>c.id===r._candidateId)){r._candidateId=null;r._selection='edit';}}
     else{r._draft=null;ensureDraft(r);r._fields=fields;}
@@ -1128,8 +1128,8 @@ $('searchQ').title='국가 지정: @JP 가수 - 제목 (@KR/@US 등). 음향 검
 $('searchQ').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualSearch();}});
 let confirmedFilter=$('fileFilter').value;
 $('fileFilter').addEventListener('input',async()=>{const q=$('fileFilter').value;if(editingResult&&!editingResult.path.toLowerCase().includes(q.toLowerCase())&&!await allowDraftMove()){$('fileFilter').value=confirmedFilter;return;}confirmedFilter=q;currentResults.forEach(r=>delete r._renameVisible);applyFilter();persistView();});
-function preferenceValues(){return {country:$('searchCountry').value,recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,save_synced:$('saveSynced').checked,create_lrc:$('createLrc').checked,rename:$('renameFiles').checked,include_ids:$('includeIds').checked,artist_name_preference:$('artistPreference').value,cover_max_px:Number($('coverMax').value)};}
-async function loadPreferences(){try{const p=await api('/api/preferences');$('searchCountry').value=p.country;$('recurse').checked=p.recurse;$('onlyEmpty').checked=p.only_empty;$('fillLyrics').checked=p.fill_lyrics;$('saveSynced').checked=!!p.save_synced;$('createLrc').checked=!!p.create_lrc;$('renameFiles').checked=p.rename;$('includeIds').checked=p.include_ids;$('artistPreference').value=p.artist_name_preference;$('coverMax').value=p.cover_max_px;}catch(e){$('statusLine').textContent='설정 읽기 실패: '+e.message;}finally{$('btnOptions').disabled=false;updateSavePreview();}}
+function preferenceValues(){return {country:$('searchCountry').value,use_fingerprint:$('useFingerprint').checked,recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,save_synced:$('saveSynced').checked,create_lrc:$('createLrc').checked,rename:$('renameFiles').checked,include_ids:$('includeIds').checked,artist_name_preference:$('artistPreference').value,cover_max_px:Number($('coverMax').value)};}
+async function loadPreferences(){try{const p=await api('/api/preferences');$('searchCountry').value=p.country;if(typeof p.use_fingerprint==='boolean')$('useFingerprint').checked=p.use_fingerprint;$('recurse').checked=p.recurse;$('onlyEmpty').checked=p.only_empty;$('fillLyrics').checked=p.fill_lyrics;$('saveSynced').checked=!!p.save_synced;$('createLrc').checked=!!p.create_lrc;$('renameFiles').checked=p.rename;$('includeIds').checked=p.include_ids;$('artistPreference').value=p.artist_name_preference;$('coverMax').value=p.cover_max_px;}catch(e){$('statusLine').textContent='설정 읽기 실패: '+e.message;}finally{$('btnOptions').disabled=false;updateSavePreview();}}
 const modalOptionIds=['onlyEmpty','fillLyrics','saveSynced','createLrc','renameFiles','includeIds','searchCountry','artistPreference','coverMax','scanPaths'];
 const modalCheckboxIds=['onlyEmpty','fillLyrics','saveSynced','createLrc','renameFiles','includeIds'];
 let optionsSnapshot=null;

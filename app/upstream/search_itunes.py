@@ -27,7 +27,7 @@ def artwork(url: str | None, size: int) -> str | None:
 
 
 def search(term: str, country: str = "US", limit: int = 20, *, on_wait=None,
-           cancel: threading.Event | None = None) -> list[Candidate]:
+           cancel: threading.Event | None = None, force: bool = False) -> list[Candidate]:
     term = (term or "").strip()
     if not term:
         return []
@@ -42,7 +42,7 @@ def search(term: str, country: str = "US", limit: int = 20, *, on_wait=None,
         if cancel is not None and cancel.is_set():
             break
         params = {"term": term, "country": c, "media": "music", "entity": "song", "limit": limit}
-        data = net.get_json(SEARCH_URL, params, on_wait=on_wait, cancel=cancel)
+        data = net.search_json(SEARCH_URL, params, on_wait=on_wait, cancel=cancel, force=force)
         for item in data.get("results") or []:
             if not isinstance(item, dict) or item.get("wrapperType") not in (None, "track"):
                 continue

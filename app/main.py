@@ -179,7 +179,7 @@ def scan_job(job_id: str, sub_path: str, opts: dict, resume: bool = False):
             try:
                 found = search_service.search(path, original_match.build_query(title, artist), opts.get("country"),
                                               original.get("duration", 0), DATA_ROOT,
-                                              use_fingerprint=opts.get("use_fingerprint", True), cancel=cancelled,
+                                              use_fingerprint=opts.get("use_fingerprint", False), cancel=cancelled,
                                               on_wait=lambda seconds: job.update(search_wait_seconds=seconds))
                 if cancelled.is_set():
                     return None
@@ -305,7 +305,7 @@ class ScanRequest(BaseModel):
     only_empty: bool = True
     fill_lyrics: bool = False
     rename: bool = False
-    use_fingerprint: bool = True
+    use_fingerprint: bool = False
     force: bool = False
     country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
 
@@ -641,7 +641,7 @@ class SearchRequest(BaseModel):
     query: str = Field(default="", max_length=500)
     mode: Literal["text", "sound"] = "text"
     country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
-    use_fingerprint: bool = True
+    use_fingerprint: bool = False
     expected_revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
@@ -725,16 +725,18 @@ def research_file(job_id: str, request: SearchRequest):
     artist, title = parse_filename(path)
     query = request.query.strip() or original_match.build_query(original.get("title") or title, original.get("artist") or artist)
     found = search_service.search(path, query, request.country, original["duration"], DATA_ROOT,
-                                  mode=request.mode, use_fingerprint=request.use_fingerprint,
+                                  mode=request.mode, use_fingerprint=request.use_fingerprint, force=True,
                                   previous=result.get("candidates") if request.mode == "sound" else None,
                                   on_wait=lambda seconds: result.update(search_wait_seconds=seconds))
-    found.pop("_timing", None)
+    timing = found.pop("_timing", {})
     with storage.OPERATION_LOCK:
         if result.get("search_generation") != generation or storage.revision(path) != original["revision"]:
             raise HTTPException(409, "파일 또는 검색 요청이 변경되어 오래된 결과를 적용하지 않았습니다")
         result.update(found, original=original)
         prepare_result(result)
         save_jobs(job_id)
+        timing.update(event="research", job_id=job_id, path=request.path)
+        logging.getLogger("uvicorn.error").info("scan_timing %s", json.dumps(timing))
         return result
 
 

@@ -85,7 +85,7 @@ class P1Tests(unittest.TestCase):
 
     def test_text_empty_fingerprint_fallback_and_partial_errors(self):
         with patch.object(itunes, "search", return_value=[]), patch.object(mb, "search", return_value=[]), patch.object(service, "sound", return_value=([self.candidate()], [])) as call:
-            found = service.search(self.root / "x", "Singer - Wonderful Song", "US", 180, self.data)
+            found = service.search(self.root / "x", "Singer - Wonderful Song", "US", 180, self.data, use_fingerprint=True)
             self.assertTrue(found["used_fingerprint"])
             self.assertEqual(found["search_status"], "matched")
             self.assertEqual(call.call_count, 1)

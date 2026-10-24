@@ -172,8 +172,8 @@ def sound(path, config, query, duration, cancel=None, on_wait=None):
     return result.candidates, errors
 
 
-def search(path, query, country, duration, data_root, mode="text", use_fingerprint=True,
-           previous=None, cancel=None, on_wait=None):
+def search(path, query, country, duration, data_root, mode="text", use_fingerprint=False,
+           previous=None, cancel=None, on_wait=None, force=False):
     started = time.perf_counter()
     timing = {"network": {}, "sources": {}}
     config = configuration(data_root)
@@ -196,8 +196,8 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
             finally:
                 timing["sources"][source] = time.perf_counter() - tick
         with ThreadPoolExecutor(max_workers=2) as pool:
-            calls = [pool.submit(guarded, "iTunes", lambda: search_itunes.search(query, country, on_wait=on_wait, cancel=cancel)),
-                     pool.submit(guarded, "MusicBrainz", lambda: search_mb.search(match.base_title(title), artist, query, on_wait=on_wait, cancel=cancel))]
+            calls = [pool.submit(guarded, "iTunes", lambda: search_itunes.search(query, country, on_wait=on_wait, cancel=cancel, force=force)),
+                     pool.submit(guarded, "MusicBrainz", lambda: search_mb.search(match.base_title(title), artist, query, on_wait=on_wait, cancel=cancel, force=force))]
             for call in calls:
                 candidates, problems = call.result()
                 found.extend(candidates)

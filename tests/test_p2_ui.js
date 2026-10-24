@@ -26,7 +26,7 @@ function harness() {
       else if(url.endsWith('/rename'))value=context.renameResponse||{};
       else if(url==='/api/jobs'||url==='/api/jobs?summary=true')value=context.jobsResponse||[];
       else if(url.endsWith('/cover-upload'))value={cover_id:'cover-token'};
-      else if(url==='/api/preferences')value=options.method?body:{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
+      else if(url==='/api/preferences')value=options.method?body:context.preferencesResponse||{country:'JP',recurse:false,only_empty:true,fill_lyrics:true,rename:true,include_ids:true,artist_name_preference:'latin',cover_max_px:500};
       else if(url==='/api/scan')value={job_id:'scan'};
       else if(url.endsWith('/save'))value=context.saveResponse||{saved:0,skipped:body.paths.length,failed:0,partial:0,results:body.paths.map(path=>({path,status:'skipped'}))};
       return {ok:true,text:async()=>JSON.stringify(value)};
@@ -492,6 +492,16 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const saveButtons=html.slice(html.indexOf('onclick="toggleTagPreview()"'),html.indexOf('id="lyricStatus"'));
   const buttonOrder=['toggleTagPreview()','saveCurrent()','saveAll()','resetChange()','openSaveOptions()'].map(fn=>saveButtons.indexOf(fn));
   assert(buttonOrder.every((index,i)=>index>=0&&(!i||index>buttonOrder[i-1])));
+  const fingerprintPrefs=harness();
+  fingerprintPrefs.context.preferencesResponse={country:'KR',recurse:true,only_empty:true,fill_lyrics:true,rename:false,include_ids:false,artist_name_preference:'original',cover_max_px:1000,use_fingerprint:true};
+  await fingerprintPrefs.run('loadPreferences()');
+  assert.equal(fingerprintPrefs.$('useFingerprint').checked,true);
+  assert.equal(fingerprintPrefs.run('preferenceValues().use_fingerprint'),true);
+  fingerprintPrefs.context.preferencesResponse.use_fingerprint=false;
+  await fingerprintPrefs.run('loadPreferences()');
+  assert.equal(fingerprintPrefs.$('useFingerprint').checked,false);
+  assert.equal(fingerprintPrefs.$('fillLyrics').checked,true);
+  assert(html.includes("use_fingerprint:mode==='sound'"));
   const timing=harness();
   timing.$('subPath').value='Album';timing.$('useFingerprint').checked=false;
   await timing.run('startScan()');

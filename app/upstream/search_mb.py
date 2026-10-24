@@ -32,7 +32,7 @@ def build_query(title: str, artist: str, free_text: str = "") -> str:
 
 
 def search(title: str, artist: str, free_text: str = "", limit: int = 20, *, on_wait=None,
-           cancel: threading.Event | None = None) -> list[Candidate]:
+           cancel: threading.Event | None = None, force: bool = False) -> list[Candidate]:
     queries = [build_query(title, artist, free_text)]
     # The fielded query misses artists known under another name (a Korean
     # alias of a Latin-script artist, say); plain text also searches aliases.
@@ -43,7 +43,7 @@ def search(title: str, artist: str, free_text: str = "", limit: int = 20, *, on_
     for query in queries:
         if not query or (cancel is not None and cancel.is_set()):
             continue
-        data = net.get_json(SEARCH_URL, {"query": query, "fmt": "json", "limit": limit}, on_wait=on_wait, cancel=cancel)
+        data = net.search_json(SEARCH_URL, {"query": query, "fmt": "json", "limit": limit}, on_wait=on_wait, cancel=cancel, force=force)
         for rec in data.get("recordings") or []:
             if isinstance(rec, dict):
                 out.append(candidate_from_recording(rec))

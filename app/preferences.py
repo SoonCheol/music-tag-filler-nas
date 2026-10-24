@@ -14,6 +14,7 @@ class Preferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     country: Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"] = "KR"
     recurse: bool = True
+    use_fingerprint: bool = False
     only_empty: bool = True
     fill_lyrics: bool = False
     save_synced: bool = False
