@@ -93,10 +93,13 @@ def is_instrumental_title(title: str) -> bool:
     return bool(_INST_RE.search(_nfkc(title)))
 
 
-def version_flags(title: str) -> tuple[bool, bool]:
-    """(instrumental, short/TV version) as the title states them."""
+def version_flags(title: str) -> tuple:
+    """Keep explicitly labelled live/remastered editions separate as well."""
     t = _nfkc(title)
-    return bool(_INST_RE.search(t)), bool(_SHORT_RE.search(t))
+    live = bool(re.search(r"(?:[\(\[\-]\s*live\b|\blive\s+(?:at|in|version)\b)", t, re.I))
+    remaster = bool(re.search(r"\bremaster(?:ed)?\b", t, re.I))
+    years = tuple(re.findall(r"\b(?:19|20)\d{2}\b", t)) if remaster else ()
+    return bool(_INST_RE.search(t)), bool(_SHORT_RE.search(t)), live, remaster, years
 
 
 def last_timestamp(lrc: str) -> float | None:

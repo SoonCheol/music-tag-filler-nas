@@ -127,7 +127,9 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   lyricUI.run("adoptJob({id:'lyrics-ui',results:currentResults.map(r=>({...r,original:{...r.original}}))})");
   finishLyric({ok:true,text:async()=>JSON.stringify({status:'found',searched:true,lyrics:'Found line one\nFound line two',lyrics_id:'verified-id'})});await pendingLyric;
   assert.equal(lyricUI.$('changeLyrics').textContent,'검색 안 함');
-  lyricUI.run('selectFile(0)');assert.equal(lyricUI.$('changeLyrics').textContent,'Found line one\nFound line two');
+  lyricUI.run('selectFile(0)');assert.notEqual(lyricUI.$('changeLyrics').textContent,'Found line one\nFound line two');
+  lyricUI.context.fetch=lyricFetch;lyricUI.context.lyricResponse={status:'found',searched:true,lyrics:'Found line one\nFound line two',lyrics_id:'verified-id'};
+  await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').value,'Found line one\nFound line two');
   assert.equal(lyricUI.run('saveItem(editingResult).lyrics_id'),'verified-id');
   lyricUI.$('onlyEmpty').checked=true;assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),false);
   lyricUI.$('onlyEmpty').checked=false;assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),true);
@@ -138,8 +140,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   lyricUI.run('toggleTagPreview()');assert.equal(lyricUI.$('currentLyrics').textContent,'Stored line one\nStored line two');
   assert.equal(lyricUI.calls.filter(c=>c.url.startsWith('/api/lyrics/')).length,1);
   lyricUI.context.fetch=lyricFetch;lyricUI.context.lyricResponse={status:'not_found',searched:true,lyrics:'',lyrics_id:'none-id'};
-  await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),false);
-  lyricUI.context.fetch=async()=>{throw new Error('offline');};await lyricUI.run('searchLyricsForCurrent()');assert.ok(lyricUI.$('changeLyrics').textContent.includes('검색 오류'));assert.notEqual(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');
+  await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').value,'Found line one\nFound line two');assert.equal(lyricUI.run('!!plannedChanges(editingResult).lyrics'),true);
+  lyricUI.context.fetch=async()=>{throw new Error('offline');};await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').value,'Found line one\nFound line two');assert.notEqual(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');
   assert.ok(html.includes('.file-lyrics+.file-name-text{margin-left:6px}'));assert.ok(html.includes('height:210px'));assert.ok(!html.includes('<textarea id="currentLyrics"'));
 
   const media=harness(),requests=[],pending=[];
@@ -149,10 +151,10 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   media.$('candidateScroller').getBoundingClientRect=()=>({top:0,bottom:100});
   const createMedia=media.context.document.createElement;let rowIndex=0;
   media.context.document.createElement=tag=>{const node=createMedia(tag);if(tag==='tr'){const i=rowIndex++;node.getBoundingClientRect=()=>({top:i*30,bottom:i*30+30});}return node;};
-  media.run("currentJobId='media';renderCandidates(mediaRow)");
-  assert.equal(requests.length,0); // no prefetch before list entry
+  media.run("currentJobId='media';mediaJobStatus='done';renderCandidates(mediaRow)");
+  assert.equal(requests.length,2); // completed jobs prefetch visible candidate media
   media.$('candidateScroller').onmouseenter();
-  assert.equal(media.run('candidateCoverRunning'),3);assert.equal(media.run('candidateLyricsRunning'),3);
+  assert.equal(media.run('candidateCoverRunning+candidateLyricsRunning'),2);
   assert.equal(media.run('candidateCoverCache.size'),4);assert.equal(media.run('candidateLyricsCache.size'),4);
   assert.equal(media.run('requestCandidateCover(mediaRow.candidates[0],mediaRow)===requestCandidateCover(mediaRow.candidates[0],mediaRow)'),true);
   const coverResponses=pending.slice(0,3);
@@ -520,7 +522,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   function automaticCover(){
     const h=harness(),pending=[];
     h.context.URL={createObjectURL:()=> 'blob:auto-cover',revokeObjectURL(){}};
-    h.context.fetch=url=>{pending.push({url});return new Promise(resolve=>pending.at(-1).resolve=resolve);};
+    h.context.fetch=url=>{if(url.endsWith('/candidate-lyrics'))return Promise.resolve({ok:true,text:async()=>JSON.stringify({status:'not_found',lyrics:''})});pending.push({url});return new Promise(resolve=>pending.at(-1).resolve=resolve);};
     h.context.autoJob={id:'auto-cover',results:[{path:'one.mp3',file_state:'auto',auto_apply:true,original:{revision:'r',title:'Original'},best:{id:'best',title:'Selected',album:'Best album'},candidates:[{id:'first',album:'Other album'},{id:'best',title:'Selected',album:'Best album'}]},{path:'two.mp3',original:{revision:'r2'}}]};
     h.run('adoptJob(autoJob)');return {h,pending};
   }

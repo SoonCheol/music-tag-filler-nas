@@ -663,7 +663,7 @@ class P2Tests(unittest.TestCase):
             job_before = copy.deepcopy(main.jobs['test'])
             found = main.original_lyrics.LyricsResult(status, text)
             with patch.object(main.original_lyrics, 'find', return_value=found) as find:
-                first = self.lyrics_search(row)
+                first = self.lyrics_search(row, force=True)
                 again = self.lyrics_search(row)
                 self.assertEqual(find.call_count, 1)
             self.assertEqual(first['status'], expected)
