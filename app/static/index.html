@@ -335,6 +335,15 @@ function candidateValues(c){
   return $('artistPreference').value==='latin'?{...c,artist:c.artist_latin||c.artist,albumartist:c.album_artist_latin||c.albumartist}:{...c};
 }
 function draftSignature(r){return JSON.stringify([r._draft,r._candidateId||null,r._coverId||null]);}
+function manualCoverDraft(r,coverId=undefined,jobId=currentJobId){
+  // Keep only uploaded asset identifiers, scoped to the exact file revision.
+  try{
+    const key=JSON.stringify([jobId,r.path,r.original?.revision]),items=new Map(JSON.parse(localStorage.getItem('musicManualCoverDrafts')||'[]'));
+    if(coverId===undefined)return items.get(key)||null;
+    items.delete(key);if(coverId)items.set(key,coverId);
+    localStorage.setItem('musicManualCoverDrafts',JSON.stringify([...items].slice(-128)));
+  }catch(e){}return null;
+}
 function ensureDraft(r){
   r._fields=effectiveFields(r);
   if(r._draft)return;
@@ -342,6 +351,7 @@ function ensureDraft(r){
   const best=r.auto_apply?r.best:null;r._candidateId=best?.id||null;r._selection=best?'auto':'none';
   if(best){const values=candidateValues(best);tagFields.forEach(f=>{if(values[f]&&!protectedField(r,f))r._draft[f]=String(values[f]);});}
   r._draftBaseline=draftSignature(r);
+  const coverId=manualCoverDraft(r);if(coverId){r._coverId=coverId;r._dirty=true;}
 }
 function captureCurrent(){
   if(!$("saveCover").disabled)commonSaveCover=$("saveCover").checked;
@@ -349,6 +359,7 @@ function captureCurrent(){
   if(!editingResult)return;ensureDraft(editingResult);tagFields.forEach(f=>{if(!protectedField(editingResult,f)&&!$('chg_'+f).readOnly)editingResult._draft[f]=$('chg_'+f).value;});
 }
 function resetDraft(r){
+  manualCoverDraft(r,null);
   r._draft=null;r._dirty=false;r._manualFields=[];r._candidateId=null;r._coverId=null;r._lyricsSearch=null;r._candidateFeedback=null;r._appliedFields=[];
   ensureDraft(r);previewPath=null;previewRevision=null;
   if(editingResult===r)tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
@@ -771,10 +782,12 @@ function pumpCandidateCovers(){
 function paintCandidateCover(box,c,r,retry=false){
   const key=candidateCoverUrl(c,r);if(box._candidateCoverKey===key&&!retry)return;
   box._candidateCoverKey=key;const token=box._candidateCoverToken=(box._candidateCoverToken||0)+1;
-  box.innerHTML='<span aria-label="커버 없음">♪</span>';
+  box.innerHTML='<span role="status">이미지 조회 중…</span>';
   requestCandidateCover(c,r,retry,true).then(url=>{
     if(box._candidateCoverToken!==token||box._candidateCoverKey!==key)return;
-    if(url)box.innerHTML=`<img src="${url}" alt="후보 커버">`;
+    const state=candidateCoverCache.get(key)?.status;
+    box.innerHTML=url?`<img src="${url}" alt="후보 커버">`+(state==='error'?'<span role="status">재조회 오류 · 이전 이미지 유지</span>':''):
+      state==='none'?'<span role="status">이미지 없음</span>':'<span role="status">이미지 조회 오류 · 후보 이미지 클릭으로 재시도</span>';
   });
 }
 function invalidateCandidateCover(box){box._candidateCoverKey=null;box._candidateCoverToken=(box._candidateCoverToken||0)+1;}
@@ -821,7 +834,7 @@ async function importCandidateCover(c,r){
     const url=await requestCandidateCover(c,r,false,true);if(!url)throw new Error('가져올 이미지가 없습니다');
     const response=await fetch(url);if(!response.ok)throw new Error('이미지를 읽을 수 없습니다');
     const blob=await response.blob(),value=await api('/api/jobs/'+encodeURIComponent(jobId)+'/cover-upload',{method:'POST',headers:{'Content-Type':blob.type},body:blob});
-    r._coverId=value.cover_id;r._dirty=true;commonSaveCover=true;
+    r._coverId=value.cover_id;manualCoverDraft(r,r._coverId,jobId);r._dirty=true;commonSaveCover=true;
     if(r._selection==='none')r._selection='edit';
     if(editingResult===r&&currentJobId===jobId){syncEditProtection(r);renderChangeCover(r);updateSavePreview();}
   }catch(error){alert('이미지 가져오기 실패: '+error.message);}
@@ -853,6 +866,7 @@ function renderCandidates(r){
       const state=candidateCoverCache.get(candidateCoverUrl(c,r))?.status||'unknown';thumb.dataset.state=state;
       thumb.innerHTML=url?`<img src="${url}" alt="">`:'♪';
       thumb.title=({ready:'앨범 이미지',none:'이미지 없음',error:'이미지 조회 오류',unknown:'이미지 미확인'})[state]+' · 클릭: 재조회 / 더블클릭: 이미지만 가져오기';
+      if(editingResult===r&&r._candidateId===c.id&&!r._coverId)renderChangeCover(r);
     });
   }
   function loadLyrics(button,c,force=false){
@@ -880,9 +894,9 @@ function renderChangeCover(r){
   const box=$('changeCover');invalidateCandidateCover(box);
   const original=r?.original?.has_cover?`<img src="/api/cover/${encodeURIComponent(r.path)}?v=${r.original.revision}" onerror="this.parentElement.textContent='no image'">`:'<span>no image</span>';
   if(!r||!$('saveCover').checked||($('onlyEmpty').checked&&r.original?.has_cover)){box.innerHTML=original;return;}
-  if(r._coverId){box.innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}">`;return;}
+  if(r._coverId){box.innerHTML=`<img src="/api/jobs/${encodeURIComponent(currentJobId)}/uploaded-cover/${encodeURIComponent(r._coverId)}" onerror="this.parentElement.textContent='수동 선택 이미지 만료 또는 조회 오류 · 이미지를 다시 선택하세요'">`;return;}
   const candidate=r.candidates?.find(c=>c.id===r._candidateId);
-  if(candidate&&candidateCoverUrl(candidate,r)&&(r._candidateMediaEntered||r._selection==='manual'||candidateCoverCache.get(candidateCoverUrl(candidate,r))?.status==='ready'))paintCandidateCover(box,candidate,r);else box.innerHTML=original;
+  if(candidate&&candidateCoverUrl(candidate,r))paintCandidateCover(box,candidate,r);else box.innerHTML=candidate?'<span role="status">이미지 없음</span>':original;
 }
 function applyCandidate(r,c){
   ensureDraft(r);captureCurrent();const base=originalValues(r),before={...r._draft},beforeCover=$('changeCover').innerHTML;
@@ -1035,7 +1049,7 @@ async function submitSave(rows,scope,label){
       if(o.lyrics_search)r._lyricsSearch={...o.lyrics_search,queryKey:lyricQueryKey(r)};
       if(o.changed&&r._lyricsSearch)r._lyricsSearch.lyrics_id=null;
       r.last_save=o;if(o.file_state)r.file_state=o.file_state;
-      if(o.changed){r._checked=false;r._dirty=false;}
+      if(o.changed){manualCoverDraft(r,null,jobId);r._checked=false;r._dirty=false;}
       if(o.original){r.original=o.original;r.path=o.path;if(o.changed){r._draft=null;r._candidateFeedback=null;r._appliedFields=[];r._coverId=null;if(editingResult===r)editingResult=null;}}
     });
     renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);reportSave(res);
@@ -1156,13 +1170,13 @@ async function uploadCover(file){
   if(!editingResult)return alert('파일을 선택하세요');if(saving||searching)return;
   if(!file||file.size>20*1024*1024)return alert('20MB 이하 이미지를 선택하세요');
   captureCurrent();const r=editingResult,jobId=currentJobId;searching=true;
-  try{const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});r._coverId=value.cover_id;r._dirty=true;if(r._selection==='none'||r._selection==='auto')r._selection='edit';if(editingResult===r){editingResult=null;selectFile(filteredResults.indexOf(r));}$('statusLine').textContent='커버 준비 완료 — 저장 전까지 음악 파일은 변경되지 않습니다';}catch(e){alert('커버 선택 실패: '+e.message);}finally{searching=false;updateSavePreview();}
+  try{const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});r._coverId=value.cover_id;manualCoverDraft(r,r._coverId,jobId);r._dirty=true;if(r._selection==='none'||r._selection==='auto')r._selection='edit';if(editingResult===r){editingResult=null;selectFile(filteredResults.indexOf(r));}$('statusLine').textContent='커버 준비 완료 — 저장 전까지 음악 파일은 변경되지 않습니다';}catch(e){alert('커버 선택 실패: '+e.message);}finally{searching=false;updateSavePreview();}
 }
 async function applyCoverToAll(){
   if(!editingResult||saving||searching)return;captureCurrent();const r=editingResult,jobId=currentJobId;
   if(!await confirmAction('커버 준비','현재 작업 전체 '+currentResults.length+'곡에 같은 커버를 준비할까요? 실제 기록은 저장할 때 수행합니다.','준비 실행','취소'))return;
   try{if(!r._coverId){const c=r.candidates?.find(c=>c.id===r._candidateId);const url=c?candidateCoverUrl(c,r):r.original?.has_cover?'/api/cover/'+encodeURIComponent(r.path):'';if(!url)throw new Error('선택한 커버가 없습니다');searching=true;const response=await fetch(url);if(!response.ok)throw new Error('커버 읽기 실패');const image=await response.blob();const value=await api('/api/jobs/'+jobId+'/cover-upload',{method:'POST',headers:{'Content-Type':image.type},body:image});r._coverId=value.cover_id;}
-    currentResults.forEach(row=>{ensureDraft(row);row._coverId=r._coverId;row._dirty=true;if(row._selection==='none'||row._selection==='auto')row._selection='edit';});editingResult=null;selectFile(filteredResults.indexOf(r));alert('전체 커버 준비 완료. 빈칸만 옵션과 저장 범위는 그대로 적용됩니다.');
+    currentResults.forEach(row=>{ensureDraft(row);row._coverId=r._coverId;manualCoverDraft(row,row._coverId,jobId);row._dirty=true;if(row._selection==='none'||row._selection==='auto')row._selection='edit';});editingResult=null;selectFile(filteredResults.indexOf(r));alert('전체 커버 준비 완료. 빈칸만 옵션과 저장 범위는 그대로 적용됩니다.');
   }catch(e){alert(e.message);}finally{searching=false;updateSavePreview();}
 }
 ['onlyEmpty','fillLyrics','saveSynced','createLrc','renameFiles','includeIds'].forEach(id=>$(id).addEventListener('change',()=>{captureCurrent();if(id==='onlyEmpty'){syncEditProtection(editingResult);renderChangeCover(editingResult);}updateSavePreview();}));

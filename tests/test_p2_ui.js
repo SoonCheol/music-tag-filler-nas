@@ -515,5 +515,44 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   // After reload, the persisted server duration is the fallback.
   assert.equal(harness().run("scanCompletionText({id:'persisted',scanned:20,scan_elapsed_seconds:91.25})"),'20곡 스캔 완료 · 1분 31.25초');
   assert.equal(timing.run('formatScanDuration(undefined)'),'0.00초');
-  console.log('PASS: temporary/confirmed folder selection; persistent tree; modal apply/cancel/Escape/validation/remember; control order, centered full-width grid and aligned panels; P2 handlers preserved.');
+  // Selected automatic cover is independent of candidate hover and list ordering.
+  const flushCover=async()=>{for(let i=0;i<15;i++)await Promise.resolve();};
+  function automaticCover(){
+    const h=harness(),pending=[];
+    h.context.URL={createObjectURL:()=> 'blob:auto-cover',revokeObjectURL(){}};
+    h.context.fetch=url=>{pending.push({url});return new Promise(resolve=>pending.at(-1).resolve=resolve);};
+    h.context.autoJob={id:'auto-cover',results:[{path:'one.mp3',file_state:'auto',auto_apply:true,original:{revision:'r',title:'Original'},best:{id:'best',title:'Selected',album:'Best album'},candidates:[{id:'first',album:'Other album'},{id:'best',title:'Selected',album:'Best album'}]},{path:'two.mp3',original:{revision:'r2'}}]};
+    h.run('adoptJob(autoJob)');return {h,pending};
+  }
+  const imageResponse={ok:true,blob:async()=>({type:'image/jpeg'})};
+  const autoCover=automaticCover();
+  assert.equal(autoCover.pending.length,1);assert.ok(autoCover.pending[0].url.includes('/cover/best?'));
+  assert.ok(autoCover.h.$('changeCover').innerHTML.includes('이미지 조회 중'));
+  const draftBefore=autoCover.h.run('draftSignature(editingResult)');
+  autoCover.pending[0].resolve(imageResponse);await flushCover();
+  assert.ok(autoCover.h.$('changeCover').innerHTML.includes('blob:auto-cover'));
+  assert.equal(autoCover.h.run('draftSignature(editingResult)'),draftBefore);
+  autoCover.h.run('selectFile(1);selectFile(0)');await flushCover();
+  assert.equal(autoCover.pending.length,1);assert.ok(autoCover.h.$('changeCover').innerHTML.includes('blob:auto-cover'));
+  const coverReloaded=automaticCover();assert.equal(coverReloaded.pending.length,1);
+  coverReloaded.pending[0].resolve(imageResponse);await flushCover();assert.ok(coverReloaded.h.$('changeCover').innerHTML.includes('blob:auto-cover'));
+  const staleCover=automaticCover();staleCover.h.run('selectFile(1)');staleCover.pending[0].resolve(imageResponse);await flushCover();
+  assert.ok(!staleCover.h.$('changeCover').innerHTML.includes('blob:auto-cover'));
+  const manualCover=automaticCover();manualCover.h.run("editingResult._coverId='manual';renderChangeCover(editingResult)");
+  manualCover.pending[0].resolve(imageResponse);await flushCover();assert.ok(manualCover.h.$('changeCover').innerHTML.includes('/uploaded-cover/manual'));
+  for(const state of ['none','error']){
+    const empty=automaticCover();empty.pending[0].resolve({ok:false,status:state==='none'?404:503,json:async()=>({detail:{state,errors:state==='error'?['upstream']:[]}})});
+    await flushCover();assert.ok(empty.h.$('changeCover').innerHTML.includes(state==='none'?'이미지 없음':'이미지 조회 오류'));
+  }
+  const protectedCover=harness();protectedCover.$('onlyEmpty').checked=true;
+  protectedCover.context.autoJob=structuredClone(autoCover.h.context.autoJob);protectedCover.context.autoJob.results[0].original.has_cover=true;
+  protectedCover.run('adoptJob(autoJob)');assert.equal(protectedCover.calls.filter(c=>c.url.includes('/cover/best?')).length,0);
+  assert.ok(protectedCover.$('changeCover').innerHTML.includes('/api/cover/one.mp3'));
+  manualCover.h.run("manualCoverDraft(editingResult,'remembered-manual')");
+  const manualReload=automaticCover();assert.equal(manualReload.pending.length,0);
+  assert.ok(manualReload.h.$('changeCover').innerHTML.includes('/uploaded-cover/remembered-manual'));
+  assert.ok(manualReload.h.$('changeCover').innerHTML.includes('수동 선택 이미지 만료'));
+  manualReload.h.run('resetDraft(editingResult);renderChangeCover(editingResult)');assert.equal(manualReload.pending.length,1);
+  const afterDiscard=automaticCover();assert.equal(afterDiscard.pending.length,1);
+  console.log('PASS: automatic selected cover, immediate repaint, cache/reload, stale/manual image protection, none/error and only-empty protection; existing P2 handlers preserved.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
