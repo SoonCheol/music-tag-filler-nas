@@ -272,6 +272,334 @@ class P0Tests(unittest.TestCase):
                 self.save(path)
         self.assertEqual(path.read_bytes(), before)
 
+    def _boundary_clean(self, path):
+        self.assertTrue(path.is_file())
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()),
+                         sorted([path.name, Path(tags.backup_path(str(path))).name]
+                                if Path(tags.backup_path(str(path))).exists() else [path.name]))
+        self.assertEqual(list(self.root.glob(".tagtxn-*")), [])
+        self.assertEqual(list(self.root.glob(".tagbak-*")), [])
+        self.assertEqual(list(self.backups.glob(".backup-*")), [])
+
+    def _boundary_backup(self, path, original, allow_missing=False):
+        folder, manifest = storage._verify_backup(path, self.root, self.backups,
+                                                   allow_missing=allow_missing)
+        self.assertEqual((folder / "original.bin").read_bytes(), original)
+        self.assertEqual(manifest["sha256"], storage.digest(original))
+        self.assertEqual(manifest["size"], len(original))
+        return {p.relative_to(self.backups).as_posix(): p.read_bytes()
+                for p in self.backups.rglob("*") if p.is_file()}
+
+    def _boundary_retry_restore(self, path, original, snapshot=None):
+        side = Path(tags.backup_path(str(path)))
+        first_side = side.read_bytes() if side.exists() else None
+        self.assertEqual(self.save(path)["status"], "saved")
+        self.assertEqual(tags.read_file(str(path)).tags.title, "Changed")
+        current = self._boundary_backup(path, original)
+        if snapshot is not None:
+            self.assertEqual(current, snapshot)
+        if first_side is not None:
+            self.assertEqual(side.read_bytes(), first_side)
+        restored = storage.restore(path, self.root, self.backups, storage.revision(path))
+        self.assertEqual(restored["status"], "restored")
+        self.assertTrue(restored["exact"])
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self._boundary_backup(path, original), current)
+        self._boundary_clean(path)
+
+    def test_boundary_first_backup_partial_copy_failure(self):
+        for ext in ("mp3", "flac", "m4a", "ogg"):
+            with self.subTest(ext=ext):
+                path = self.copy("backup-copy." + ext)
+                original = path.read_bytes()
+                injected = OSError("injected partial original copy")
+                copyfile = shutil.copyfile
+                reached = []
+
+                def fail_copy(src, dst, *args, **kwargs):
+                    if Path(dst).parent.name.startswith(".backup-"):
+                        reached.append(Path(dst))
+                        Path(dst).write_bytes(original[:32])
+                        raise injected
+                    return copyfile(src, dst, *args, **kwargs)
+
+                with patch.object(storage.shutil, "copyfile", side_effect=fail_copy):
+                    with self.assertRaises(storage.StorageError) as error:
+                        self.save(path)
+                self.assertIs(error.exception.__cause__, injected)
+                self.assertEqual(len(reached), 1)
+                self.assertFalse(reached[0].exists())
+                self.assertEqual(path.read_bytes(), original)
+                self.assertFalse(Path(tags.backup_path(str(path))).exists())
+                self.assertFalse((self.backups / storage.digest(path.name.encode())).exists())
+                self._boundary_clean(path)
+                self._boundary_retry_restore(path, original)
+                path.unlink()
+                Path(tags.backup_path(str(path))).unlink()
+
+    def test_boundary_first_backup_metadata_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        make_backup = tags.make_backup
+        injected = OSError("injected after temporary tag backup write")
+        reached = []
+
+        def fail_metadata(name, *args, **kwargs):
+            result = make_backup(name, *args, **kwargs)
+            reached.append(Path(result))
+            self.assertTrue(Path(result).is_file())
+            raise injected
+
+        with patch.object(tags, "make_backup", side_effect=fail_metadata) as mocked:
+            with self.assertRaises(storage.StorageError) as error:
+                self.save(path)
+        mocked.assert_called_once()
+        self.assertIs(error.exception.__cause__, injected)
+        self.assertFalse(reached[0].exists())
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(Path(tags.backup_path(str(path))).exists())
+        self.assertEqual(list(self.backups.iterdir()), [])
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original)
+
+    def test_boundary_central_published_sidecar_link_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        side = Path(tags.backup_path(str(path)))
+        link = os.link
+        injected = OSError("injected sidecar publish failure")
+        reached = []
+
+        def fail_sidecar(src, dst, *args, **kwargs):
+            if Path(dst) == side:
+                reached.append(Path(src))
+                self.assertEqual(Path(src).read_bytes(),
+                                 (self.backups / storage.digest(path.name.encode()) / "tags.json").read_bytes())
+                raise injected
+            return link(src, dst, *args, **kwargs)
+
+        with patch.object(storage.os, "link", side_effect=fail_sidecar):
+            with self.assertRaises(storage.StorageError) as error:
+                self.save(path)
+        self.assertIs(error.exception.__cause__, injected)
+        self.assertEqual(len(reached), 1)
+        self.assertFalse(reached[0].exists())
+        self.assertFalse(side.exists())
+        self.assertEqual(path.read_bytes(), original)
+        snapshot = self._boundary_backup(path, original, allow_missing=True)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_stage_creation_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        mkstemp = tempfile.mkstemp
+        injected = OSError("injected music stage allocation failure")
+        reached = []
+
+        def fail_stage(*args, **kwargs):
+            if kwargs.get("prefix") == ".tagtxn-" and Path(kwargs["dir"]) == path.parent:
+                reached.append(True)
+                raise injected
+            return mkstemp(*args, **kwargs)
+
+        with patch.object(storage.tempfile, "mkstemp", side_effect=fail_stage):
+            with self.assertRaises(OSError) as error:
+                self.save(path)
+        self.assertIs(error.exception, injected)
+        self.assertEqual(reached, [True])
+        self.assertEqual(path.read_bytes(), original)
+        snapshot = self._boundary_backup(path, original)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_stage_partial_copy_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        copyfile = shutil.copyfile
+        reached = []
+        injected = OSError("injected partial stage copy")
+
+        def fail_copy(src, dst, *args, **kwargs):
+            if Path(dst).name.startswith(".tagtxn-"):
+                reached.append(Path(dst))
+                Path(dst).write_bytes(original[:32])
+                raise injected
+            return copyfile(src, dst, *args, **kwargs)
+
+        with patch.object(storage.shutil, "copyfile", side_effect=fail_copy):
+            with self.assertRaises(OSError) as error:
+                self.save(path)
+        self.assertIs(error.exception, injected)
+        self.assertEqual(len(reached), 1)
+        self.assertFalse(reached[0].exists())
+        self.assertEqual(path.read_bytes(), original)
+        snapshot = self._boundary_backup(path, original)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_stage_write_then_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        write_file = tags.write_file
+        reached = []
+        injected = OSError("injected after actual staged tag write")
+
+        def fail_write(name, *args, **kwargs):
+            self.assertNotEqual(Path(name), path)
+            write_file(name, *args, **kwargs)
+            self.assertEqual(tags.read_file(name).tags.title, "Changed")
+            reached.append(Path(name))
+            raise injected
+
+        with patch.object(tags, "write_file", side_effect=fail_write) as mocked:
+            with self.assertRaises(OSError) as error:
+                self.save(path)
+        mocked.assert_called_once()
+        self.assertIs(error.exception, injected)
+        self.assertEqual(len(reached), 1)
+        self.assertFalse(reached[0].exists())
+        self.assertEqual(path.read_bytes(), original)
+        snapshot = self._boundary_backup(path, original)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_stage_validation_failure(self):
+        path = self.copy()
+        original = path.read_bytes()
+        read_file = tags.read_file
+        reached = []
+
+        def wrong_staged_tags(name):
+            info = read_file(name)
+            if Path(name).name.startswith(".tagtxn-"):
+                self.assertEqual(info.tags.title, "Changed")
+                reached.append(Path(name))
+                return dataclasses.replace(info, tags=dataclasses.replace(info.tags, title="wrong readback"))
+            return info
+
+        with patch.object(tags, "read_file", side_effect=wrong_staged_tags):
+            with self.assertRaisesRegex(storage.StorageError, "저장 검증 실패"):
+                self.save(path)
+        self.assertEqual(len(reached), 1)
+        self.assertFalse(reached[0].exists())
+        self.assertEqual(path.read_bytes(), original)
+        snapshot = self._boundary_backup(path, original)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_stage_fsync_failure_before_music_replace(self):
+        path = self.copy()
+        original = path.read_bytes()
+        storage.ensure_backup(path, self.root, self.backups, storage.revision(path))
+        snapshot = self._boundary_backup(path, original)
+        injected = OSError("injected stage fsync failure")
+        with patch.object(storage.os, "fsync", side_effect=injected) as sync:
+            with patch.object(storage.os, "replace", wraps=os.replace) as replace:
+                with self.assertRaises(OSError) as error:
+                    self.save(path)
+        sync.assert_called_once()
+        replace.assert_not_called()
+        self.assertIs(error.exception, injected)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self._boundary_backup(path, original), snapshot)
+        self._boundary_clean(path)
+        self._boundary_retry_restore(path, original, snapshot)
+
+    def test_boundary_music_replace_failure_keeps_previous_edit(self):
+        for ext in ("mp3", "flac", "m4a", "ogg"):
+            with self.subTest(ext=ext):
+                path = self.copy("replace." + ext)
+                original = path.read_bytes()
+                self.save(path, title="Previous edit")
+                previous = path.read_bytes()
+                snapshot = self._boundary_backup(path, original)
+                side = Path(tags.backup_path(str(path)))
+                first_side = side.read_bytes()
+                replace = os.replace
+                reached = []
+                injected = OSError("injected music replace failure")
+
+                def fail_replace(src, dst, *args, **kwargs):
+                    if Path(dst) == path:
+                        reached.append(Path(src))
+                        self.assertEqual(tags.read_file(str(src)).tags.title, "Changed")
+                        self.assertEqual(path.read_bytes(), previous)
+                        raise injected
+                    return replace(src, dst, *args, **kwargs)
+
+                with patch.object(storage.os, "replace", side_effect=fail_replace):
+                    with self.assertRaises(OSError) as error:
+                        self.save(path)
+                self.assertIs(error.exception, injected)
+                self.assertEqual(len(reached), 1)
+                self.assertFalse(reached[0].exists())
+                self.assertEqual(path.read_bytes(), previous)
+                self.assertEqual(side.read_bytes(), first_side)
+                self.assertEqual(self._boundary_backup(path, original), snapshot)
+                self._boundary_clean(path)
+                self._boundary_retry_restore(path, original, snapshot)
+                path.unlink()
+                side.unlink()
+
+    def test_boundary_post_replace_describe_failure_preserves_recovery(self):
+        for ext in ("mp3", "flac", "m4a", "ogg"):
+            with self.subTest(ext=ext):
+                path = self.copy("post-replace." + ext)
+                original = path.read_bytes()
+                expected = storage.revision(path)
+                injected = OSError("injected final description failure")
+                with patch.object(storage, "describe", side_effect=injected) as describe:
+                    with self.assertRaises(OSError) as error:
+                        self.save(path)
+                describe.assert_called_once_with(path)
+                self.assertIs(error.exception, injected)
+                self.assertNotEqual(path.read_bytes(), original)
+                self.assertEqual(tags.read_file(str(path)).tags.title, "Changed")
+                snapshot = self._boundary_backup(path, original)
+                self._boundary_clean(path)
+                with self.assertRaises(storage.StorageError):
+                    storage.save(path, self.root, self.backups, {"title": "Retry"},
+                                 ["title"], False, expected)
+                committed = path.read_bytes()
+                outcome = self.save(path)
+                self.assertEqual((outcome["status"], outcome["reason"]), ("skipped", "unchanged"))
+                self.assertEqual(path.read_bytes(), committed)
+                self.assertEqual(self._boundary_backup(path, original), snapshot)
+                outcome = storage.restore(path, self.root, self.backups, storage.revision(path))
+                self.assertTrue(outcome["exact"])
+                self.assertEqual(path.read_bytes(), original)
+                self._boundary_clean(path)
+                path.unlink()
+                Path(tags.backup_path(str(path))).unlink()
+
+    @unittest.expectedFailure
+    def test_boundary_http_post_replace_failure_reports_committed_change(self):
+        # Known defect: a post-commit description error is reported as an ordinary
+        # failed save. This assertion specifies the desired signal, not that defect.
+        verified = []
+        # expectedFailure must not hide an unreachable mock or broken setup.
+        self.addCleanup(lambda: self.assertEqual(verified, [True]))
+        path = self.copy()
+        original = path.read_bytes()
+        row = self.job([path])[0]
+        injected = OSError("injected post-commit description failure")
+        with patch.object(storage, "describe", side_effect=injected) as describe:
+            response = self.http(self.request([self.item(row)]))
+        describe.assert_called_once_with(path)
+        self.assertNotEqual(path.read_bytes(), original)
+        self.assertEqual(tags.read_file(str(path)).tags.title, "Hand edited title")
+        self.assertIn(str(injected), response["results"][0]["message"])
+        self._boundary_backup(path, original)
+        self._boundary_clean(path)
+        restored = storage.restore(path, self.root, self.backups, storage.revision(path))
+        self.assertTrue(restored["exact"])
+        self.assertEqual(path.read_bytes(), original)
+        # Keep last: mock reachability, committed bytes and recovery must be checked
+        # before the known reporting defect becomes an expected failure.
+        verified.append(True)
+        self.assertEqual(response["results"][0]["status"], "partial")
+
     def test_legacy_backup_is_not_overwritten(self):
         path = self.copy()
         sidecar = Path(tags.backup_path(str(path)))
