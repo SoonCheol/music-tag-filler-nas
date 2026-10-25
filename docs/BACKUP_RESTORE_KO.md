@@ -125,3 +125,5 @@ Docker context는 `app/**`를 포함하며 배포 허용 목록에도 이 모듈
 화면 소스 복구 시 `app/static/index.html`, `app/static/css/style.css`, `app/static/js/app.js`를 함께 복구한다. CSS와 JavaScript는 HTML의 기존 위치에서 외부 참조하며 Docker context의 `app/**`에 포함된다.
 
 JavaScript 기능 분리 이후에는 `app/static/js/`의 `search-list.js`, `candidate-media.js`, `lyrics.js`, `tag-editor.js`, `options-ui.js`, `app.js` 6개와 `index.html`을 같은 버전으로 복구한다. 책임·공유 상태·로딩 순서는 [UI JavaScript 구조](UI_JAVASCRIPT.md)를 따른다.
+
+스캔 실행 분리 이후에는 `app/main.py`와 `app/scan_service.py`를 같은 버전으로 복구한다. 실행 의존성·상태 소유권은 [스캔 서비스 구조](SCAN_SERVICE.md)를 따른다. 작업 JSON 형식과 복구 규칙은 변경하지 않았다.

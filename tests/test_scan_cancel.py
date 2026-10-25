@@ -20,22 +20,38 @@ class Probe(unittest.TestCase):
         before=[(p.read_bytes(),p.stat().st_mtime_ns) for p in paths]
         self.job(paths)
         main.jobs['test'].update(status='queued',results=[],scanned=0,cancel_requested=False)
-        entered=threading.Event()
+        entered, first_saved = threading.Event(), threading.Event()
+        gate=threading.Lock()
+        counts={'calls':0,'blocked':0}
+        original_save=main.save_jobs
+        def persist(job_id=None):
+            original_save(job_id)
+            if main.jobs['test']['scanned']==1:
+                first_saved.set()
         def search(*args,**kwargs):
-            if search_mock.call_count==2:
-                entered.set()
+            with gate:
+                counts['calls']+=1
+                first=counts['calls']==1
+                if not first:
+                    counts['blocked']+=1
+                    if counts['blocked']==2:entered.set()
+            if not first:
                 while not kwargs['cancel'].is_set():
                     threading.Event().wait(.01)
             return {'candidates':[],'search_status':'not_found'}
-        with patch.object(search_service,'search',side_effect=search) as search_mock:
+        with patch.object(search_service,'search',side_effect=search) as search_mock, patch.object(main,'save_jobs',side_effect=persist):
             worker=threading.Thread(target=main.scan_job,args=('test','',{}))
             worker.start()
-            self.assertTrue(entered.wait(5))
-            main.cancel_job('test')
-            self.assertEqual(main.jobs['test']['status'],'cancelling')
-            worker.join(5)
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertTrue(first_saved.wait(5))
+                main.cancel_job('test')
+                self.assertEqual(main.jobs['test']['status'],'cancelling')
+            finally:
+                main.jobs['test']['cancel_requested']=True
+                worker.join(5)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(search_mock.call_count,2)
+            self.assertEqual(search_mock.call_count,3)
         job=main.jobs['test']
         self.assertEqual((job['status'],job['scanned'],job['total'],job['current_file'],job['search_wait_seconds']),('cancelled',1,3,'',0))
         with patch.object(search_service,'search',return_value={'candidates':[],'search_status':'not_found'}):
@@ -45,7 +61,7 @@ class Probe(unittest.TestCase):
             main.scan_job(new,'',{'use_fingerprint':False})
             self.assertEqual(main.jobs[new]['status'],'done')
         self.assertEqual(before,[(p.read_bytes(),p.stat().st_mtime_ns) for p in paths])
-        print('PROBE stop/restart: cancelled 1/3; no third search; metadata unchanged')
+        print('PROBE stop/restart: cancelled 1/3; three-worker limit; metadata unchanged')
 
     def test_throttle_cancel_boundary(self):
         event=threading.Event()
@@ -84,4 +100,9 @@ class Probe(unittest.TestCase):
         with patch.object(search_service,'search',side_effect=stop):
             main.scan_job('test','',{})
         self.assertEqual(main.jobs['test']['status'],'cancelled')
-        self.assertEqual(main.jobs['test']['results'],[])
+        rows=main.jobs['test']['results']
+        self.assertEqual(len(rows),1)
+        self.assertEqual((rows[0]['search_phase'],rows[0]['file_state']),('waiting','waiting'))
+        self.assertEqual(rows[0]['candidates'],[])
+        self.assertNotIn('error',rows[0])
+        self.assertEqual(main.jobs['test']['scanned'],0)
