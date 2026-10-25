@@ -763,7 +763,7 @@ class P2Tests(unittest.TestCase):
         main.jobs['other'] = copy.deepcopy(main.jobs['test'])
         wrong_job = self.item(rows[0], fields=[], values={}, lyrics_id=token)
         self.assertEqual(self.http(self.request([wrong_job], save_lyrics=True), route='/api/jobs/other/save')['failed'], 1)
-        entry = next(e for e in main._lyrics_cache.values() if e['lyrics_id'] == token)
+        entry = next(e for e in main._lyrics_service._lyrics_cache.values() if e['lyrics_id'] == token)
         entry['expires'] = 0
         self.assertEqual(self.http(self.request([wrong_job], save_lyrics=True))['failed'], 1)
         self.assertEqual(self.http(self.request([wrong_job], save_lyrics=False))['failed'], 0)

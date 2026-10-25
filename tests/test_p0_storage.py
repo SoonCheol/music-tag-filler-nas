@@ -81,8 +81,8 @@ class P0Tests(unittest.TestCase):
         main.JOBS_FILE = self.data / "jobs.json"
         main.jobs.clear()
         # Shared in-memory lyrics must not leak mocked results between test cases.
-        for name in ('_lyrics_cache', '_lyrics_tokens', '_lyrics_results', '_lyrics_results_pending', '_lyrics_pending'):
-            getattr(main, name, {}).clear()
+        for name in ('_lyrics_cache', '_lyrics_tokens', '_lyrics_results', '_lyrics_results_pending'):
+            getattr(main._lyrics_service, name, {}).clear()
 
     def tearDown(self):
         self.case.cleanup()

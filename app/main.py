@@ -10,14 +10,14 @@ from starlette.background import BackgroundTask
 import mutagen
 from functools import wraps
 from collections import OrderedDict
-from concurrent.futures import Future
 import io
 import inspect
 from .request_models import (
     ScanRequest, DeleteJobsRequest, SaveItem, SaveRequest, LyricsSearchRequest,
     RevertRequest, SearchRequest, RenameRequest, CandidateLyricsRequest,
 )
-from . import storage, search_service, job_service, preferences, rename_service, job_store, scan_service
+from . import storage, search_service, job_service, preferences, rename_service, job_store, scan_service, lyrics_service
+from .lyrics_service import lyric_response
 from .scan_service import ScanCancellation
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
@@ -353,40 +353,11 @@ def resume_job(job_id: str, background_tasks: BackgroundTasks):
     return {"status": "resumed", "id": job_id}
 
 
-_lyrics_cache = OrderedDict()
-_lyrics_pending = {}
-_lyrics_lock = threading.RLock()
-_lyrics_tokens = OrderedDict()
-_lyrics_results = OrderedDict()
-_lyrics_results_pending = {}
-LYRICS_CACHE_LIMIT = 2000
-LYRICS_CACHE_TTL = 86400
-
-
-def lyric_response(entry):
-    return {**{key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "synced", "message")}, "query_title": entry["key"][4], "query_artist": entry["key"][5]}
+_lyrics_service = lyrics_service.LyricsService(lambda: MUSIC_ROOT, lambda candidate: candidate_id(candidate))
 
 
 def remember_lyrics(key, found, searched=True, candidate_key=None):
-    text = original_lyrics.clean_text(found.text) if found.status == original_lyrics.FOUND else ""
-    status = "found" if text else "not_found" if found.status in (original_lyrics.FOUND, original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error"
-    messages = {original_lyrics.BUSY: "가사 서버에 연결할 수 없습니다. 다시 시도해 주세요.",
-                original_lyrics.CONFLICT: "검색된 가사가 서로 일치하지 않아 사용할 수 없습니다.",
-                original_lyrics.NEED_TAGS: "가사 검색에 제목과 가수가 필요합니다."}
-    entry = {"key": key, "candidate_id": candidate_key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
-             "lyrics": text, "synced": getattr(found, "synced", "") if text else "", "message": messages.get(found.status, "가사 검색 오류가 발생했습니다.") if status == "error" else "",
-             "expires": time.monotonic() + (LYRICS_CACHE_TTL if status == "found" else 1800 if status == "not_found" else 60)}
-    with _lyrics_lock:
-        _lyrics_cache[key] = entry
-        _lyrics_tokens[entry["lyrics_id"]] = entry
-        while len(_lyrics_tokens) > LYRICS_CACHE_LIMIT:
-            _, old = _lyrics_tokens.popitem(last=False)
-            if _lyrics_cache.get(old["key"]) is old:
-                _lyrics_cache.pop(old["key"])
-        _lyrics_cache.move_to_end(key)
-        while len(_lyrics_cache) > LYRICS_CACHE_LIMIT:
-            _lyrics_cache.popitem(last=False)
-    return entry
+    return _lyrics_service.remember_lyrics(key, found, searched, candidate_key)
 
 
 @app.post("/api/jobs/{job_id}/lyrics-search")
@@ -414,74 +385,11 @@ def search_file_lyrics(job_id: str, request: LyricsSearchRequest):
 
 
 def lookup_lyrics(job_id, path, revision, title, artist, duration, candidate=None, force=False):
-    """Shared content lookup; save tokens stay bound to file, revision and candidate.
-
-    The network runs outside OPERATION_LOCK. Exact query/version/length keys avoid
-    sharing a lyric across different artists or editions. No disk cache is used.
-    """
-    key = (str(MUSIC_ROOT.resolve()), job_id, path, revision, title, artist)
-    candidate_key = candidate_id(candidate) if candidate else None
-    edition = tuple(str((candidate or {}).get(k) or "") for k in ("title", "artist", "album", "duration"))
-    content_key = (title, artist, float(duration or 0), edition)
-    with _lyrics_lock:
-        existing = _lyrics_cache.get(key)
-        if not force and existing and existing["expires"] > time.monotonic() and existing.get("candidate_id") == candidate_key:
-            _lyrics_cache.move_to_end(key)
-            _lyrics_tokens.move_to_end(existing["lyrics_id"])
-            if content_key in _lyrics_results:
-                _lyrics_results.move_to_end(content_key)
-            return existing
-        cached = _lyrics_results.get(content_key)
-        if cached and cached[0] <= time.monotonic():
-            _lyrics_results.pop(content_key, None)
-            cached = None
-        future = _lyrics_results_pending.get(content_key)
-        owner = future is None
-        if cached and not force:
-            _lyrics_results.move_to_end(content_key)
-            found = cached[1]
-            owner = False
-            future = None
-        elif owner:
-            future = Future()
-            _lyrics_results_pending[content_key] = future
-    if future is not None:
-        if owner:
-            try:
-                found = original_lyrics.find(title, artist, duration) if title.strip() and artist.strip() else original_lyrics.LyricsResult(original_lyrics.NEED_TAGS)
-            except Exception:
-                found = original_lyrics.LyricsResult(original_lyrics.BUSY)
-            ttl = LYRICS_CACHE_TTL if found.status == original_lyrics.FOUND else 1800 if found.status in (original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else 60
-            with _lyrics_lock:
-                _lyrics_results[content_key] = (time.monotonic() + ttl, found)
-                _lyrics_results.move_to_end(content_key)
-                while len(_lyrics_results) > LYRICS_CACHE_LIMIT:
-                    _lyrics_results.popitem(last=False)
-                _lyrics_results_pending.pop(content_key, None)
-                future.set_result(found)
-        else:
-            found = future.result()
-    # Keep a previously valid draft token usable when a refresh finds nothing/errors.
-    valid = found.status == original_lyrics.FOUND and bool(found.text.strip())
-    if not valid and existing and existing["expires"] > time.monotonic():
-        entry = dict(existing)
-        entry.update(status="not_found" if found.status in (original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error",
-                     lyrics="", synced="", message="가사를 찾지 못했거나 조회에 실패했습니다.")
-        return entry
-    with _lyrics_lock:
-        latest = _lyrics_cache.get(key)
-        if latest and latest is not existing and latest["expires"] > time.monotonic() and latest.get("candidate_id") == candidate_key:
-            return latest
-        return remember_lyrics(key, found, bool(title.strip() and artist.strip()), candidate_key)
+    return _lyrics_service.lookup_lyrics(job_id, path, revision, title, artist, duration, candidate, force)
 
 
 def selected_lyrics(job_id, path, revision, lyrics_id, title, artist):
-    with _lyrics_lock:
-        entry = _lyrics_tokens.get(lyrics_id)
-        if not entry or entry["expires"] <= time.monotonic() or entry["key"] != (str(MUSIC_ROOT.resolve()), job_id, path, revision, title, artist):
-            raise storage.StorageError("가사 검색 결과가 만료되었거나 태그가 변경되었습니다. 다시 검색하세요")
-        _lyrics_tokens.move_to_end(lyrics_id)
-        return entry
+    return _lyrics_service.selected_lyrics(job_id, path, revision, lyrics_id, title, artist)
 
 
 @app.get("/api/capabilities")
@@ -704,15 +612,7 @@ def save_one(result, item, request, lyric_context=None):
     lyrics = manual_lyrics
     lyrics_status = choice["status"] if choice else "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:
-        context = lyric_context if lyric_context is not None else {"busy_streak": 0}
-        actually_searched = context["busy_streak"] < 5
-        if not actually_searched:
-            found = original_lyrics.LyricsResult(original_lyrics.BUSY)
-        else:
-            found = original_lyrics.find(final["title"], final["artist"], current.length)
-            if found.status == original_lyrics.BUSY:
-                found = original_lyrics.find(final["title"], final["artist"], current.length)
-        context["busy_streak"] = context["busy_streak"] + 1 if found.status == original_lyrics.BUSY else 0
+        found, actually_searched = _lyrics_service.legacy_lookup(final["title"], final["artist"], current.length, lyric_context)
         lyrics_status = found.status
         if found.status == original_lyrics.FOUND:
             lyrics = found.text
@@ -1031,22 +931,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 
 
 def rekey_lyrics(event):
-    remaps = []
-    with _lyrics_lock:
-        for token, entry in list(_lyrics_tokens.items()):
-            key = entry["key"]
-            if key[0] == str(MUSIC_ROOT.resolve()) and key[2] == event["old_path"]:
-                _lyrics_tokens.pop(token)
-                if _lyrics_cache.get(key) is entry:
-                    _lyrics_cache.pop(key)
-                if key[3] != event["revision"]:
-                    continue
-                new_key = (*key[:2], event["new_path"], *key[3:])
-                entry = {**entry, "key": new_key, "lyrics_id": uuid.uuid4().hex}
-                _lyrics_cache[new_key] = entry
-                _lyrics_tokens[entry["lyrics_id"]] = entry
-                remaps.append({"job_id": key[1], "old_id": token, "new_id": entry["lyrics_id"]})
-    return remaps
+    return _lyrics_service.rekey_lyrics(event)
 
 
 _rename_tokens = {}

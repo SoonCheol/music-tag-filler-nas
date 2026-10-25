@@ -29,7 +29,7 @@
 ## 활성 파일
 
 `app/main.py`는 FastAPI, `storage.py`는 저장·백업·복원,
-`search_service.py`는 검색/커버, `job_service.py`는 탐색/이어하기,
+`lyrics_service.py`는 가사 조회/캐시/토큰, `search_service.py`는 검색/커버, `job_service.py`는 탐색/이어하기,
 `preferences.py`는 설정/임시 커버, `app/static/index.html`은 웹 화면입니다.
 원본의 MIT 코드는 `app/upstream/`에 있습니다.
 

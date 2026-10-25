@@ -25,8 +25,8 @@ class Command007Tests(unittest.TestCase):
 
     def setUp(self):
         p0.P0Tests.setUp(self)
-        for cache in (main._lyrics_cache, main._lyrics_tokens, main._lyrics_results,
-                      main._lyrics_results_pending, main._lyrics_pending):
+        for cache in (main._lyrics_service._lyrics_cache, main._lyrics_service._lyrics_tokens, main._lyrics_service._lyrics_results,
+                      main._lyrics_service._lyrics_results_pending):
             cache.clear()
 
     def candidate_request(self, row, index=0, **changes):
@@ -60,17 +60,17 @@ class Command007Tests(unittest.TestCase):
 
     def test_cache_lru_and_expiry(self):
         found=search_lyrics.LyricsResult(search_lyrics.FOUND,self.plain)
-        with patch.object(main,'LYRICS_CACHE_LIMIT',2),patch.object(search_lyrics,'find',return_value=found) as lookup:
+        with patch.object(main._lyrics_service,'LYRICS_CACHE_LIMIT',2),patch.object(search_lyrics,'find',return_value=found) as lookup:
             for title in ('A','B','A','C'):
                 main.lookup_lyrics('test',title,'a'*64,title,'Singer',180)
-            self.assertEqual([key[0] for key in main._lyrics_results],['A','C'])
-            self.assertLessEqual(len(main._lyrics_cache),2);self.assertLessEqual(len(main._lyrics_tokens),2)
-            key=next(k for k in main._lyrics_results if k[0]=='A')
-            main._lyrics_results[key]=(0,found)
-            main._lyrics_cache.pop((str(main.MUSIC_ROOT.resolve()),'test','A','a'*64,'A','Singer'),None)
+            self.assertEqual([key[0] for key in main._lyrics_service._lyrics_results],['A','C'])
+            self.assertLessEqual(len(main._lyrics_service._lyrics_cache),2);self.assertLessEqual(len(main._lyrics_service._lyrics_tokens),2)
+            key=next(k for k in main._lyrics_service._lyrics_results if k[0]=='A')
+            main._lyrics_service._lyrics_results[key]=(0,found)
+            main._lyrics_service._lyrics_cache.pop((str(main.MUSIC_ROOT.resolve()),'test','A','a'*64,'A','Singer'),None)
             main.lookup_lyrics('test','A','a'*64,'A','Singer',180)
             self.assertEqual(lookup.call_count,4)
-        self.assertEqual(main.LYRICS_CACHE_LIMIT,2000);self.assertEqual(main.LYRICS_CACHE_TTL,86400)
+        self.assertEqual(main._lyrics_service.LYRICS_CACHE_LIMIT,2000);self.assertEqual(main._lyrics_service.LYRICS_CACHE_TTL,86400)
 
     def test_concurrent_requests_and_network_does_not_hold_save_lock(self):
         entered=threading.Event();release=threading.Event()
