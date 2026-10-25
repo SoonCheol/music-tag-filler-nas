@@ -2,14 +2,22 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-// Reassemble asset text for existing source assertions; execute the external script below.
-const html = fs.readFileSync('app/static/index.html', 'utf8')
+// Load each classic script in the same order and scope as the page.
+const pageHtml = fs.readFileSync('app/static/index.html', 'utf8');
+const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1]);
+assert.equal(scriptPaths.length, 6);
+assert.equal(scriptPaths.at(-1), 'app/static/js/app.js');
+assert.equal(new Set(scriptPaths).size, scriptPaths.length);
+assert(!/<script[^>]+(?:async|defer|type=)/.test(pageHtml));
+// Feature scripts must load without DOM access or initialized shared state.
+scriptPaths.slice(0, -1).forEach(p => vm.runInNewContext(fs.readFileSync(p, 'utf8'), {}, {filename:p}));
+const uiScripts = scriptPaths.map(p => ({path:p, source:fs.readFileSync(p, 'utf8')
+  .replace(/^(?:loadPreferences|loadFolders|pollJobs|pollSaveTasks)\(\);/gm, '')}));
+const script = uiScripts.map(s => s.source).join('\n');
+// Preserve the existing source assertions across the split assets.
+const html = pageHtml
   .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
-  .replace('<script src="/static/js/app.js"></script>', () => '<script>' + fs.readFileSync('app/static/js/app.js', 'utf8') + '</script>');
-const script = fs.readFileSync('app/static/js/app.js', 'utf8')
-  .replace(/^pollSaveTasks\(\);/m, '')
-  .replace(/^loadPreferences\(\);/m, '')
-  .replace(/^loadFolders\(\);\s*^pollJobs\(\);/m, '');
+  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p, 'utf8') + '</script>');
 const elements = new Map(), checks = [], sent = [], notices = [];
 function element() {
   return { value: '', checked: false, hidden: true, style: {setProperty(k,v){this[k]=v;}}, children: [], listeners: {},
@@ -41,7 +49,7 @@ const context = vm.createContext({ console, Set, Map, encodeURIComponent, clearT
     const results = body.paths.map(path => ({ path, status: 'skipped' }));
     return { ok: true, text: async () => JSON.stringify({ saved: 0, skipped: results.length, failed: 0, partial: 0, results }) };
   }, setTimeout() {} });
-vm.runInContext(script, context);
+uiScripts.forEach(s => vm.runInContext(s.source, context, {filename:s.path}));
 function run(source) { return vm.runInContext(source, context); }
 async function acceptSave(source) {
   const pending=run(source);assert.equal($('actionDialog').open,true);

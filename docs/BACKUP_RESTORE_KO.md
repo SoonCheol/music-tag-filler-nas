@@ -123,3 +123,5 @@ API 요청 모델은 `app/request_models.py`에 있으며 소스 복구 시 `app
 Docker context는 `app/**`를 포함하며 배포 허용 목록에도 이 모듈을 포함한다.
 
 화면 소스 복구 시 `app/static/index.html`, `app/static/css/style.css`, `app/static/js/app.js`를 함께 복구한다. CSS와 JavaScript는 HTML의 기존 위치에서 외부 참조하며 Docker context의 `app/**`에 포함된다.
+
+JavaScript 기능 분리 이후에는 `app/static/js/`의 `search-list.js`, `candidate-media.js`, `lyrics.js`, `tag-editor.js`, `options-ui.js`, `app.js` 6개와 `index.html`을 같은 버전으로 복구한다. 책임·공유 상태·로딩 순서는 [UI JavaScript 구조](UI_JAVASCRIPT.md)를 따른다.

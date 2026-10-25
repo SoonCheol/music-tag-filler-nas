@@ -2,12 +2,22 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-// Reassemble asset text for existing source assertions; execute the external script below.
-const html = fs.readFileSync('app/static/index.html', 'utf8')
+// Load each classic script in the same order and scope as the page.
+const pageHtml = fs.readFileSync('app/static/index.html', 'utf8');
+const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1]);
+assert.equal(scriptPaths.length, 6);
+assert.equal(scriptPaths.at(-1), 'app/static/js/app.js');
+assert.equal(new Set(scriptPaths).size, scriptPaths.length);
+assert(!/<script[^>]+(?:async|defer|type=)/.test(pageHtml));
+// Feature scripts must load without DOM access or initialized shared state.
+scriptPaths.slice(0, -1).forEach(p => vm.runInNewContext(fs.readFileSync(p, 'utf8'), {}, {filename:p}));
+const uiScripts = scriptPaths.map(p => ({path:p, source:fs.readFileSync(p, 'utf8')
+  .replace(/^(?:loadPreferences|loadFolders|pollJobs|pollSaveTasks)\(\);/gm, '')}));
+const script = uiScripts.map(s => s.source).join('\n');
+// Preserve the existing source assertions across the split assets.
+const html = pageHtml
   .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
-  .replace('<script src="/static/js/app.js"></script>', () => '<script>' + fs.readFileSync('app/static/js/app.js', 'utf8') + '</script>');
-const script = fs.readFileSync('app/static/js/app.js', 'utf8')
-  .replace(/^loadPreferences\(\);/m, '').replace(/^loadFolders\(\);/m, '').replace(/^pollJobs\(\);/m, '').replace(/^pollSaveTasks\(\);/m, '');
+  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p, 'utf8') + '</script>');
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
@@ -39,7 +49,7 @@ function harness() {
     pause(){this.paused=true;this.listeners.pause?.();},
     async play(){this.plays++;this.paused=false;this.currentSrc=this.src;this.listeners.playing?.();}});
   $('saveCover').checked=true;$('saveLyrics').checked=true;
-  vm.runInContext(script,context);
+  uiScripts.forEach(s => vm.runInContext(s.source, context, {filename:s.path}));
   return {$,calls,context,documentEvents,run:code=>vm.runInContext(code,context)};
 }
 function click(button,h){let stopped=false;const event={target:button,stopPropagation(){stopped=true;}};button.onclick(event);if(!stopped)h.documentEvents.click(event);return stopped;}
