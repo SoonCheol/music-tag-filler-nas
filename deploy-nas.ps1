@@ -16,7 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 if (!$ConfigFile) { $ConfigFile = Join-Path $projectRoot 'deploy-nas.local.json' }
-$files = @('app/main.py', 'app/static/index.html', 'app/storage.py',
+$files = @('app/main.py', 'app/request_models.py', 'app/static/index.html', 'app/storage.py',
     'app/upstream/__init__.py', 'app/upstream/tags.py', 'app/upstream/match.py',
     'app/upstream/net.py', 'app/upstream/search_lyrics.py', 'app/upstream/LICENSE', 'app/upstream/NOTICE.md',
     'app/search_service.py', 'app/upstream/search_itunes.py', 'app/upstream/search_mb.py',

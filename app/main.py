@@ -1,19 +1,22 @@
 import os, json, re, uuid, time, threading, logging
 from pathlib import Path
-from typing import List, Dict, Optional, Literal
+from typing import Dict, Optional
 import requests, musicbrainzngs
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.background import BackgroundTask
-from pydantic import BaseModel, Field, ConfigDict
 import mutagen
 from functools import wraps
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor, wait, FIRST_COMPLETED
 import io
 import inspect
+from .request_models import (
+    ScanRequest, DeleteJobsRequest, SaveItem, SaveRequest, LyricsSearchRequest,
+    RevertRequest, SearchRequest, RenameRequest, CandidateLyricsRequest,
+)
 from . import storage, search_service, job_service, preferences, rename_service, job_store
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
@@ -297,18 +300,6 @@ def path_operation(label):
     return decorate
 
 
-class ScanRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    sub_path: str = ""
-    paths: List[str] = Field(default_factory=list, max_length=200)
-    recurse: bool = True
-    only_empty: bool = True
-    fill_lyrics: bool = False
-    rename: bool = False
-    use_fingerprint: bool = False
-    force: bool = False
-    country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
-
 def get_active_job():
     for j in jobs.values():
         if j.get("status") in job_service.ACTIVE:
@@ -459,11 +450,6 @@ def remove_job_records(ids):
     return {"deleted":removed}
 
 
-class DeleteJobsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ids: List[str] = Field(min_length=1,max_length=1000)
-
-
 @app.post("/api/jobs/delete")
 @job_locked
 def delete_jobs(request: DeleteJobsRequest):
@@ -511,50 +497,6 @@ def resume_job(job_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(503, "이어하기 기록 실패: " + str(exc))
     background_tasks.add_task(scan_job, job_id, job.get("sub_path",""), job.get("options",{}), True)
     return {"status": "resumed", "id": job_id}
-
-TagField = Literal["title", "artist", "album", "albumartist", "track", "year", "genre"]
-
-
-class SaveItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    selection: Literal["auto", "manual", "edit", "none"]
-    candidate_id: Optional[str] = None
-    values: Dict[TagField, str] = Field(default_factory=dict)
-    fields: List[TagField] = Field(default_factory=list)
-    include_cover: bool = False
-    cover_id: Optional[str] = None
-    include_ids: bool = False
-    lyrics_id: Optional[str] = None
-    lyrics_text: Optional[str] = Field(default=None, max_length=30000)
-
-
-class SaveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    scope: Literal["current", "selected", "all"]
-    paths: List[str]
-    checked_paths: List[str] = Field(default_factory=list)
-    items: List[SaveItem]
-    save_cover: bool = True
-    save_lyrics: bool = True
-    only_empty: bool = True
-    fill_lyrics: bool = False
-    save_synced: bool = False
-    create_lrc: bool = False
-    rename: bool = False
-    cover_max_px: Optional[int] = Field(default=None, ge=100, le=1000)
-    artist_name_preference: Literal["original", "latin"] = "original"
-
-
-class LyricsSearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    title: str = Field(max_length=4096)
-    artist: str = Field(max_length=4096)
-    force: bool = False
-    candidate_id: Optional[str] = None
 
 
 _lyrics_cache = OrderedDict()
@@ -686,21 +628,6 @@ def selected_lyrics(job_id, path, revision, lyrics_id, title, artist):
             raise storage.StorageError("가사 검색 결과가 만료되었거나 태그가 변경되었습니다. 다시 검색하세요")
         _lyrics_tokens.move_to_end(lyrics_id)
         return entry
-
-
-class RevertRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class SearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    query: str = Field(default="", max_length=500)
-    mode: Literal["text", "sound"] = "text"
-    country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
-    use_fingerprint: bool = False
-    expected_revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 @app.get("/api/capabilities")
@@ -1249,13 +1176,6 @@ def root():
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
-class RenameRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    stem: str = Field(max_length=255)
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 def rekey_lyrics(event):
     remaps = []
     with _lyrics_lock:
@@ -1374,14 +1294,6 @@ def rename_conflict(fallback=None, include_saves=True):
 @app.get("/api/background-operations")
 def background_operations():
     return {"operations": operation_snapshot()}
-
-
-class CandidateLyricsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    candidate_id: str
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    force: bool = False
 
 
 @app.post("/api/jobs/{job_id}/candidate-lyrics")
