@@ -121,3 +121,5 @@ SYLT는 MP3 ID3v2.3에 명시된 밀리초만 저장하고 USLT를 함께 유지
 
 API 요청 모델은 `app/request_models.py`에 있으며 소스 복구 시 `app/main.py`와 함께 복구한다.
 Docker context는 `app/**`를 포함하며 배포 허용 목록에도 이 모듈을 포함한다.
+
+화면 소스 복구 시 `app/static/index.html`, `app/static/css/style.css`, `app/static/js/app.js`를 함께 복구한다. CSS와 JavaScript는 HTML의 기존 위치에서 외부 참조하며 Docker context의 `app/**`에 포함된다.

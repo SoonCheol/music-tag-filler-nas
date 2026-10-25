@@ -2,8 +2,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const html = fs.readFileSync('app/static/index.html', 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
+// Reassemble asset text for existing source assertions; execute the external script below.
+const html = fs.readFileSync('app/static/index.html', 'utf8')
+  .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
+  .replace('<script src="/static/js/app.js"></script>', () => '<script>' + fs.readFileSync('app/static/js/app.js', 'utf8') + '</script>');
+const script = fs.readFileSync('app/static/js/app.js', 'utf8')
   .replace(/^loadPreferences\(\);/m, '').replace(/^loadFolders\(\);/m, '').replace(/^pollJobs\(\);/m, '').replace(/^pollSaveTasks\(\);/m, '');
 const memory = new Map();
 function harness() {
@@ -477,7 +480,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert(!html.includes('<details'));assert(!html.includes('입력·저장 옵션'));
   assert(html.includes('#scanControls{grid-column:1/-1;justify-content:center;'));
   const stack=[],parents={};const voids=new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-  for(const token of html.split('<script>')[0].matchAll(/<\/?([a-z][\w-]*)\b([^>]*)>/gi)){
+  for(const token of html.split(/<script\b/)[0].matchAll(/<\/?([a-z][\w-]*)\b([^>]*)>/gi)){
     const name=token[1].toLowerCase();if(token[0].startsWith('</')){assert.equal(stack.pop()?.name,name);continue;}
     const id=token[2].match(/\bid="([^"]+)"/)?.[1];if(id)parents[id]=stack.at(-1);
     if(!voids.has(name))stack.push({name,id,attrs:token[2]});

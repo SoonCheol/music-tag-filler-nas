@@ -16,7 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 if (!$ConfigFile) { $ConfigFile = Join-Path $projectRoot 'deploy-nas.local.json' }
-$files = @('app/main.py', 'app/request_models.py', 'app/static/index.html', 'app/storage.py',
+$files = @('app/main.py', 'app/request_models.py', 'app/static/index.html', 'app/static/css/style.css', 'app/static/js/app.js', 'app/storage.py',
     'app/upstream/__init__.py', 'app/upstream/tags.py', 'app/upstream/match.py',
     'app/upstream/net.py', 'app/upstream/search_lyrics.py', 'app/upstream/LICENSE', 'app/upstream/NOTICE.md',
     'app/search_service.py', 'app/upstream/search_itunes.py', 'app/upstream/search_mb.py',
@@ -226,7 +226,7 @@ try {
     }
     if ($changed.Count) {
         $backup = "$remoteRoot/deploy-backups/$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
-        Invoke-Nas "mkdir -p '$backup/app/static' '$backup/app/upstream' '$remoteRoot/app/upstream'"
+        Invoke-Nas "mkdir -p '$backup/app/static/css' '$backup/app/static/js' '$backup/app/upstream' '$remoteRoot/app/static/css' '$remoteRoot/app/static/js' '$remoteRoot/app/upstream'"
         foreach ($file in $changed) { Invoke-Nas "if test -f '$remoteRoot/$file'; then cp -p '$remoteRoot/$file' '$backup/$file'; fi" }
         Write-Host "Original files backed up at $backup"
         foreach ($file in $changed) {

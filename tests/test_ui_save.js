@@ -2,8 +2,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const html = fs.readFileSync('app/static/index.html', 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
+// Reassemble asset text for existing source assertions; execute the external script below.
+const html = fs.readFileSync('app/static/index.html', 'utf8')
+  .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
+  .replace('<script src="/static/js/app.js"></script>', () => '<script>' + fs.readFileSync('app/static/js/app.js', 'utf8') + '</script>');
+const script = fs.readFileSync('app/static/js/app.js', 'utf8')
   .replace(/^pollSaveTasks\(\);/m, '')
   .replace(/^loadPreferences\(\);/m, '')
   .replace(/^loadFolders\(\);\s*^pollJobs\(\);/m, '');
@@ -21,11 +24,12 @@ for (const field of ['title', 'artist', 'album', 'albumartist', 'track', 'year',
 }
 $('saveCover').checked=true;$('saveLyrics').checked=true;
 $('onlyEmpty').checked = false;$('coverMax').value=1000;
-const context = vm.createContext({ console, Set, Map, encodeURIComponent,
+const context = vm.createContext({ console, Set, Map, encodeURIComponent, clearTimeout, AbortController, performance: {now: () => 0},
   document: { getElementById: $, createElement: element, addEventListener() {},
     querySelectorAll(selector) { return selector === '.chg-check' ? checks : []; } },
   alert: message => notices.push(message), confirm: () => true,
   fetch: async (url, options) => {
+    if(url.endsWith('/candidate-lyrics'))return {ok:true,text:async()=>JSON.stringify({status:'not_found',lyrics:''})};
     if(url.startsWith('/api/lyrics/'))return {ok:true,text:async()=>JSON.stringify({lyrics:''})};
     const body = JSON.parse(options.body); sent.push({ url, body });
     if (url.endsWith('/search')) return { ok: true, text: async () => JSON.stringify({
