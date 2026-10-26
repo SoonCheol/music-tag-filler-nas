@@ -210,6 +210,8 @@ def update_jobs(jobs, old, new, root):
                 row["path"] = new
                 if "abs_path" in row:
                     row["abs_path"] = str(Path(root) / new)
+            if row.get("abs_path") == str(Path(root) / old):
+                row["abs_path"] = str(Path(root) / new)
         opts = job.get("options", {})
         if isinstance(opts.get("paths"), list):
             opts["paths"] = [new if p == old else p for p in opts["paths"]]
@@ -219,6 +221,14 @@ def update_jobs(jobs, old, new, root):
             job["sub_path"] = new
         if isinstance(job.get("missing_paths"), list):
             job["missing_paths"] = [new if p == old else p for p in job["missing_paths"]]
+        if job.get("current_file") == old:
+            job["current_file"] = new
+        if job.get("current_path") == str(Path(root) / old):
+            job["current_path"] = str(Path(root) / new)
+        for row in job.get("results", []):
+            last = row.get("last_save")
+            if isinstance(last, dict) and last.get("path") == old:
+                last["path"] = new
 
 
 def ensure_alias(folder, relative, tags_sha):
@@ -286,14 +296,73 @@ def finish(record, path, root, backups, jobs, save_jobs):
     return record
 
 
+def relocated_path(root, relative, events):
+    """Resolve a missing path only through verified, completed rename lineage."""
+    events = sorted(events, key=lambda item: item[1]["seq"])
+    source = Path(root) / relative
+    if source.exists() or source.is_symlink():
+        return None
+    starts = [i for i, (_, r) in enumerate(events)
+              if r["status"] == "complete" and Path(r["old_path"]) == Path(relative)]
+    if not starts:
+        return None
+    if len(starts) != 1:
+        raise storage.StorageError("이전 경로에 여러 이름 변경 기록이 있어 복구를 확정할 수 없습니다")
+    index = starts[0]
+    final = events[index][1]
+    for _, later in events[index + 1:]:
+        if later["status"] == "complete" and Path(later["old_path"]) == Path(final["new_path"]):
+            same_backup = (final["backup_id"] is not None and final["backup_id"] == later["backup_id"]
+                           and final["tags_sha"] == later["tags_sha"])
+            if final["identity"] != later["identity"] and not same_backup:
+                raise storage.StorageError("연속 이름 변경의 파일 연결을 확인할 수 없습니다")
+            final = later
+    target = storage.resolve_music(root, final["new_path"])
+    if identity(target) != final["identity"] or storage.revision(target) != final["revision"]:
+        raise storage.StorageError("이름 변경 후 실제 파일 정체 또는 리비전이 다릅니다")
+    return final["new_path"]
+
+
+def reconcile_jobs(root, events, jobs, save_jobs):
+    references = set()
+    for job in jobs.values():
+        references.update(r["path"] for r in job.get("results", []) if r.get("path"))
+        references.update(job.get("options", {}).get("paths") or [])
+        references.update(job.get("missing_paths") or [])
+        for value in [job.get("current_path")] + [r.get("abs_path") for r in job.get("results", [])]:
+            if value:
+                try:
+                    references.add(str(Path(value).relative_to(root)))
+                except ValueError:
+                    pass
+        for row in job.get("results", []):
+            last = row.get("last_save")
+            if isinstance(last, dict) and last.get("path"):
+                references.add(last["path"])
+        for value in (job.get("sub_path"), job.get("options", {}).get("sub_path"), job.get("current_file")):
+            if value:
+                references.add(value)
+    # Validate every mapping before changing any job, including completed journals.
+    mappings = [(old, relocated_path(root, old, events)) for old in sorted(references)]
+    for old, new in mappings:
+        if new is not None:
+            update_jobs(jobs, old, new, root)
+    if events:
+        # A prior save may have updated memory but failed to persist the jobs.
+        # The job store skips unchanged records after successful publication.
+        save_jobs()
+
+
 def recover(root, data, backups, jobs, save_jobs):
     key = str(Path(data).resolve())
     blocked.pop(key, None)
+    failed_journal = None
     try:
         renames, _ = recovery_records(data, root)
         for path, record in renames:
             if record["status"] in ("complete", "aborted"):
                 continue
+            failed_journal = path
             if record["root"] != str(Path(root).resolve()):
                 raise storage.StorageError("복구 기록의 음악 루트가 다릅니다")
             old, new = Path(root) / record["old_path"], Path(root) / record["new_path"]
@@ -304,7 +373,17 @@ def recover(root, data, backups, jobs, save_jobs):
                 write_record(path, record)
             else:
                 finish(record, path, root, backups, jobs, save_jobs)
+            failed_journal = None
+        reconcile_jobs(root, renames, jobs, save_jobs)
     except Exception as exc:
+        if failed_journal is not None:
+            try:
+                durable = json.loads(failed_journal.read_bytes())
+                if durable["status"] == "pending" and durable.get("error") != str(exc):
+                    durable["error"] = str(exc)
+                    write_record(failed_journal, durable)
+            except Exception:
+                pass  # Preserve the durable pending journal if error recording also fails.
         blocked[key] = str(exc)
         raise storage.StorageError(str(exc)) from exc
 

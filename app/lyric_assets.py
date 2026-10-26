@@ -45,25 +45,49 @@ def finish(asset, root):
         raise storage.StorageError("LRC 경로 검증 실패")
     if needed(music, record["text"]):
         storage._new_file(target, payload(record["text"]))
-        rename_service.sync_dir(target.parent)
+    # A previous publication may have succeeded before directory sync failed.
+    rename_service.sync_dir(target.parent)
     record["status"] = "complete"
+    record.pop("error", None)
     storage._replace_file(journal, storage._json_bytes(record))
     rename_service.sync_dir(journal.parent)
 
 
 def recover(root, data):
-    _, records = rename_service.recovery_records(data, root)
+    renames, records = rename_service.recovery_records(data, root)
     for journal, record in records:
         if record["status"] != "pending":
             continue
-        if record["root"] != str(Path(root).resolve()):
-            raise storage.StorageError("LRC 복구 기록의 음악 루트가 다릅니다")
-        music = storage.resolve_music(root, record["music"])
-        current = storage.revision(music)
-        if current == record["after"]:
-            finish((journal, record), root)
-        elif current == record["before"]:
-            record["status"] = "aborted"
-            storage._replace_file(journal, storage._json_bytes(record))
-        else:
-            raise storage.StorageError("음악과 LRC 기록의 상태가 모호합니다: " + str(music))
+        try:
+            relocated = rename_service.relocated_path(root, record["music"], renames)
+            if relocated is not None:
+                target = storage.resolve_music(root, relocated)
+                if storage.revision(target) not in (record["before"], record["after"]):
+                    raise storage.StorageError("이름 변경 기록과 LRC 대상 리비전이 다릅니다")
+                # Persist the verified new association before publishing any LRC.
+                record.update(music=relocated, lrc=str(Path(relocated).with_suffix(".lrc")))
+                storage._replace_file(journal, storage._json_bytes(record))
+                rename_service.sync_dir(journal.parent)
+            music = storage.resolve_music(root, record["music"])
+            prior = [r for _, r in renames if r["status"] == "complete"
+                     and Path(r["old_path"]) == Path(record["music"])]
+            if prior and all(rename_service.identity(music) != r["identity"] for r in prior):
+                raise storage.StorageError("LRC 이전 경로가 다른 파일에 재사용되어 복구를 확정할 수 없습니다")
+            current = storage.revision(music)
+            if current == record["after"]:
+                finish((journal, record), root)
+            elif current == record["before"]:
+                record["status"] = "aborted"
+                record.pop("error", None)
+                storage._replace_file(journal, storage._json_bytes(record))
+                rename_service.sync_dir(journal.parent)
+            else:
+                raise storage.StorageError("음악과 LRC 기록의 상태가 모호합니다: " + str(music))
+        except Exception as exc:
+            record.update(status="pending", error=str(exc))
+            try:
+                storage._replace_file(journal, storage._json_bytes(record))
+                rename_service.sync_dir(journal.parent)
+            except OSError:
+                pass  # Keep the last durable pending record if error reporting also fails.
+            raise storage.StorageError("LRC 복구 확인 필요: " + str(exc)) from exc

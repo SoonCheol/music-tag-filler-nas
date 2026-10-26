@@ -373,7 +373,7 @@ class RecoveryBoundaryTests(unittest.TestCase):
         calls = []
 
         def fail_record(name, data):
-            if Path(name).parent == self.data / "renames":
+            if Path(name).parent == self.data / "renames" and json.loads(data)["status"] == "complete":
                 calls.append(Path(name))
                 self.assertEqual(json.loads(data)["status"], "complete")
                 raise OSError("injected complete rename record")

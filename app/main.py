@@ -167,9 +167,13 @@ def job_locked(function):
         with storage.OPERATION_LOCK:
             if function.__name__ in ("start_scan", "resume_job"):
                 try:
-                    rename_service.check_ready(DATA_ROOT)
+                    rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
+                    if function.__name__ == "resume_job":
+                        rename_service.reconcile_jobs(MUSIC_ROOT.resolve(), rename_service.records(DATA_ROOT), jobs, save_jobs)
                 except storage.StorageError as exc:
                     raise HTTPException(409, str(exc))
+                except OSError as exc:
+                    raise HTTPException(503, "이어하기 경로 기록 실패: " + str(exc))
             return function(*args, **kwargs)
     return wrapped
 
@@ -737,16 +741,20 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                 outcome.setdefault("path", relative)
                 if outcome.get("original"):
                     result["original"] = outcome["original"]
-                    result["path"] = outcome["path"]
-                    result["abs_path"] = str(MUSIC_ROOT / outcome["path"])
+                result["path"] = outcome["path"]
+                result["abs_path"] = str(MUSIC_ROOT / outcome["path"])
                 if outcome.get("changed"):
                     result["stored_saved"] = True
                 result["file_state"] = file_state(result)
                 outcome["file_state"] = result["file_state"]
                 result["last_save"] = {k: v for k, v in outcome.items() if k not in ("original", "lyrics_search")}
             except Exception as exc:
-                outcome = {"path": relative, "status": "failed", "message": str(exc)}
+                outcome = {"path": result["path"], "request_path": relative,
+                           "status": "failed", "message": str(exc)}
                 result["last_save"] = outcome
+            update_save_task(task_id, sub_path=job.get("sub_path", ""),
+                             current_file=Path(outcome["path"]).name,
+                             current_path=str(MUSIC_ROOT / outcome["path"]))
             outcomes.append(outcome)
             if outcome["status"] in ("saved", "partial"):
                 counts["saved"] += 1
