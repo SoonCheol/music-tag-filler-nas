@@ -256,11 +256,11 @@ class AutoRenameTests(unittest.TestCase):
                 injected.append(path.read_bytes())
 
         with patch.object(ren, "write_record", side_effect=replace_source), patch.object(ren, "no_replace") as move:
-            outcome = self._save(path, rename=True)
+            with self.assertRaisesRegex(storage.StorageError, "상태를 확인"):
+                self._save(path, rename=True)
         self.assertEqual(len(injected), 1)
         move.assert_not_called()
         self.assertEqual(path.read_bytes(), injected[0])
-        self.assertEqual(outcome["status"], "partial")
         self._rename_record("pending")
         with self.assertRaises(storage.StorageError):
             ren.check_ready(self.data)

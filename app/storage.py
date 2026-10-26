@@ -24,6 +24,15 @@ class StorageError(Exception):
     pass
 
 
+def postprocess_error(outcome, stage, exc):
+    """Keep a confirmed file result when reporting an ancillary failure."""
+    message = ("음악 저장 완료; " if outcome.get("music_saved") else "") + stage + ": " + str(exc)
+    outcome.setdefault("postprocess_errors", []).append({"stage": stage, "message": str(exc)})
+    outcome["status"] = "partial"
+    outcome["warning"] = "; ".join(filter(None, (outcome.get("warning"), message)))
+    return outcome
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -244,6 +253,7 @@ def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
         lrc = None
     lrc_needed = lyric_assets.needed(path, lrc)
     asset = None
+    publication_error = None
     rename_needed = bool(rename and tags.rename_target(str(path), new_tags))
     if new_tags == info.tags and final_ids == info.ids and prepared is None and lyrics is None and synced is None and not lrc_needed and not rename_needed:
         return {"status": "skipped", "reason": "unchanged", "original": describe(path), "path": str(path.relative_to(root))}
@@ -251,6 +261,7 @@ def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
     folder, manifest = ensure_backup(path, root, backup_root, expected)
     changed_fields = {field for field in final if final[field] != info.tags.as_dict()[field]}
     content_changed = bool(changed_fields or final_ids != info.ids or prepared is not None or lyrics is not None or synced is not None)
+    committed_revision = expected
     if content_changed:
         fd, name = tempfile.mkstemp(prefix=".tagtxn-", suffix=path.suffix, dir=path.parent)
         os.close(fd)
@@ -298,50 +309,79 @@ def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
                 os.fsync(stream.fileno())
             if lrc_needed:
                 asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, revision(stage))
-            os.replace(stage, path)
+            committed_revision = revision(stage)
+            try:
+                os.replace(stage, path)
+            except Exception as exc:
+                # Some filesystem wrappers can raise after publishing the staged file.
+                if stage.exists() or path.is_symlink() or not path.is_file() or revision(path) != committed_revision:
+                    raise
+                publication_error = exc
         finally:
             stage.unlink(missing_ok=True)
-    if lrc_needed:
-        if asset is None:
-            asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, expected)
-        try:
-            lyric_assets.finish(asset, root)
-        except Exception as exc:
+    # From here on, a verified tag transaction has already been published.
+    outcome = {"status": "saved", "changed": bool(content_changed or lrc_needed),
+               "music_saved": bool(content_changed or not rename_needed), "path": str(path.relative_to(root)), "rename_error": None}
+    if publication_error is not None:
+        postprocess_error(outcome, "음악 게시 후 확인", publication_error)
+    try:
+        if lrc_needed:
+            if asset is None:
+                asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, committed_revision)
             try:
                 lyric_assets.finish(asset, root)
             except Exception:
-                from . import rename_service
-                rename_service.blocked[str(Path(asset_root or Path(backup_root).parent).resolve())] = str(exc)
-                raise StorageError("음악/LRC 기록 복구가 필요합니다: " + str(path) + ": " + str(exc)) from exc
-    rename_error = None
-    if rename:
-        if not content_changed and revision(path) != expected:
-            raise StorageError("이름 변경 직전 파일이 변경되었습니다")
-        from . import rename_service
-        target = rename_service.automatic_target(path, new_tags)
-        if target:
-            try:
-                if rename_context is not None:
-                    active_jobs, persist_jobs, active_id = rename_context
-                    row = next(r for r in active_jobs[active_id]["results"] if r["path"] == str(path.relative_to(root)))
-                    row["original"] = describe(path)
-                else:
-                    # Standalone storage callers have no job to persist; recovery
-                    # still uses the normal durable journal and backup identity.
-                    active_jobs, persist_jobs, active_id = {}, lambda: None, None
-                event = rename_service.rename(root, asset_root or Path(backup_root).parent, backup_root,
-                                              active_jobs, persist_jobs, active_id,
-                                              str(path.relative_to(root)), target.stem, revision(path))
-                path = root / event["new_path"]
-            except Exception as exc:
-                rename_error = "태그는 저장됐으나 이름 변경 실패: " + str(exc)
-                if isinstance(exc, rename_service.RenameIncomplete) and exc.current_path is not None:
-                    previous = str(path.relative_to(root))
-                    path = exc.current_path
+                try:
+                    lyric_assets.finish(asset, root)
+                except Exception as exc:
+                    lyric_assets.record_error(asset[0], exc)
+                    from . import rename_service
+                    rename_service.blocked[str(Path(asset_root or Path(backup_root).parent).resolve())] = str(exc)
+                    outcome["recovery_pending"] = True
+                    raise StorageError("음악/LRC 기록 복구가 필요합니다: " + str(path) + ": " + str(exc)) from exc
+        if rename:
+            from . import rename_service
+            target = rename_service.automatic_target(path, new_tags)
+            if target:
+                try:
                     if rename_context is not None:
-                        rename_service.update_jobs(active_jobs, previous, str(path.relative_to(root)), root)
-    return {"status": "partial" if rename_error else "saved", "changed": bool(content_changed or lrc_needed or (rename_needed and rename_error is None)), "path": str(path.relative_to(root)),
-            "original": describe(path), "rename_error": rename_error}
+                        active_jobs, persist_jobs, active_id = rename_context
+                        row = next(r for r in active_jobs[active_id]["results"] if r["path"] == str(path.relative_to(root)))
+                        row["original"] = describe(path)
+                    else:
+                        active_jobs, persist_jobs, active_id = {}, lambda: None, None
+                    event = rename_service.rename(root, asset_root or Path(backup_root).parent, backup_root,
+                                                  active_jobs, persist_jobs, active_id,
+                                                  str(path.relative_to(root)), target.stem, committed_revision)
+                    path = root / event["new_path"]
+                    outcome["changed"] = True
+                    outcome["music_saved"] = True
+                except Exception as exc:
+                    outcome["rename_error"] = "태그 처리 후 이름 변경/후속 처리 오류: " + str(exc)
+                    if isinstance(exc, rename_service.RenameIncomplete) and exc.current_path is not None:
+                        previous = str(path.relative_to(root))
+                        path = Path(exc.current_path)
+                        moved = str(path.relative_to(root)) != previous
+                        outcome["changed"] |= moved
+                        outcome["music_saved"] |= moved
+                        outcome["recovery_pending"] = True
+                        if rename_context is not None:
+                            rename_service.update_jobs(active_jobs, previous, str(path.relative_to(root)), root)
+                    raise
+    except Exception as exc:
+        # Do not infer success from an exception alone: recheck the committed bytes.
+        if path.is_symlink() or not path.is_file() or revision(path) != committed_revision:
+            raise StorageError("저장된 음악 파일의 상태를 확인할 수 없습니다: " + str(path)) from exc
+        postprocess_error(outcome, "LRC/이름 변경 후속 처리", exc)
+    outcome["path"] = str(path.relative_to(root))
+    try:
+        outcome["original"] = describe(path)
+    except Exception as exc:
+        postprocess_error(outcome, "저장 결과 읽기", exc)
+    if not outcome["music_saved"]:
+        outcome["status"] = "failed"
+        outcome["message"] = outcome.get("warning", "음악 이름 변경을 완료하지 못했습니다")
+    return outcome
 
 
 def restore(path, root, backup_root, expected):

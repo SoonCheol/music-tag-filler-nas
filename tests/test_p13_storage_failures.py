@@ -180,8 +180,10 @@ class RecoveryBoundaryTests(unittest.TestCase):
             return real_link(src, dst, *args, **kwargs)
 
         with patch.object(storage.os, "link", side_effect=fail_link):
-            with self.assertRaisesRegex(storage.StorageError, "LRC"):
-                self._save(path, lrc=self.timed)
+            outcome = self._save(path, lrc=self.timed)
+            self.assertEqual(outcome["status"], "partial")
+            self.assertTrue(outcome["music_saved"])
+            self.assertTrue(outcome["recovery_pending"])
         self.assertEqual(len(calls), 2)  # Initial completion and its retry.
         self.assertTrue(all(not p.exists() for p in calls))
         self.assertFalse(lrc.exists())
@@ -211,14 +213,17 @@ class RecoveryBoundaryTests(unittest.TestCase):
 
         def fail_record(target, data):
             if Path(target).parent == self.data / "lyric-assets":
-                calls.append(Path(target))
-                self.assertEqual(json.loads(data)["status"], "complete")
-                raise OSError("injected complete LRC record update")
+                if json.loads(data)["status"] == "complete":
+                    calls.append(Path(target))
+                    raise OSError("injected complete LRC record update")
+                return replace_file(target, data)
             return replace_file(target, data)
 
         with patch.object(storage, "_replace_file", side_effect=fail_record):
-            with self.assertRaisesRegex(storage.StorageError, "LRC"):
-                self._save(path, lrc=self.timed)
+            outcome = self._save(path, lrc=self.timed)
+            self.assertEqual(outcome["status"], "partial")
+            self.assertTrue(outcome["music_saved"])
+            self.assertTrue(outcome["recovery_pending"])
         self.assertEqual(len(calls), 2)
         journal, record = self._lrc_record("pending")
         self.assertEqual(record["after"], storage.revision(path))

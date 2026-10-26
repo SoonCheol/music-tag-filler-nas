@@ -53,6 +53,18 @@ def finish(asset, root):
     rename_service.sync_dir(journal.parent)
 
 
+def record_error(journal, exc):
+    # Read the durable status: finish() may have changed its in-memory copy.
+    try:
+        record = json.loads(journal.read_bytes())
+        if record["status"] == "pending":
+            record["error"] = str(exc)
+            storage._replace_file(journal, storage._json_bytes(record))
+            rename_service.sync_dir(journal.parent)
+    except Exception:
+        pass  # An error-reporting failure must leave the existing journal intact.
+
+
 def recover(root, data):
     renames, records = rename_service.recovery_records(data, root)
     for journal, record in records:

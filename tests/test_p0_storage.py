@@ -550,10 +550,11 @@ class P0Tests(unittest.TestCase):
                 expected = storage.revision(path)
                 injected = OSError("injected final description failure")
                 with patch.object(storage, "describe", side_effect=injected) as describe:
-                    with self.assertRaises(OSError) as error:
-                        self.save(path)
+                    outcome = self.save(path)
                 describe.assert_called_once_with(path)
-                self.assertIs(error.exception, injected)
+                self.assertEqual(outcome["status"], "partial")
+                self.assertTrue(outcome["music_saved"])
+                self.assertIn(str(injected), outcome["warning"])
                 self.assertNotEqual(path.read_bytes(), original)
                 self.assertEqual(tags.read_file(str(path)).tags.title, "Changed")
                 snapshot = self._boundary_backup(path, original)
@@ -573,12 +574,9 @@ class P0Tests(unittest.TestCase):
                 path.unlink()
                 Path(tags.backup_path(str(path))).unlink()
 
-    @unittest.expectedFailure
     def test_boundary_http_post_replace_failure_reports_committed_change(self):
-        # Known defect: a post-commit description error is reported as an ordinary
-        # failed save. This assertion specifies the desired signal, not that defect.
+        # #019: a confirmed publication remains successful despite a readback error.
         verified = []
-        # expectedFailure must not hide an unreachable mock or broken setup.
         self.addCleanup(lambda: self.assertEqual(verified, [True]))
         path = self.copy()
         original = path.read_bytes()
@@ -589,14 +587,13 @@ class P0Tests(unittest.TestCase):
         describe.assert_called_once_with(path)
         self.assertNotEqual(path.read_bytes(), original)
         self.assertEqual(tags.read_file(str(path)).tags.title, "Hand edited title")
-        self.assertIn(str(injected), response["results"][0]["message"])
+        self.assertIn(str(injected), response["results"][0]["warning"])
         self._boundary_backup(path, original)
         self._boundary_clean(path)
         restored = storage.restore(path, self.root, self.backups, storage.revision(path))
         self.assertTrue(restored["exact"])
         self.assertEqual(path.read_bytes(), original)
-        # Keep last: mock reachability, committed bytes and recovery must be checked
-        # before the known reporting defect becomes an expected failure.
+        # Verify committed bytes and exact restoration before checking reporting.
         verified.append(True)
         self.assertEqual(response["results"][0]["status"], "partial")
 

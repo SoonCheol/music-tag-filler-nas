@@ -628,19 +628,22 @@ def save_one(result, item, request, lyric_context=None):
                            only_empty, item.expected_revision, cover, lyrics, request.rename, ids, replace_lyrics=bool(manual_lyrics),
                            synced=synced if request.save_synced else None, lrc=synced if request.create_lrc else None,
                            asset_root=DATA_ROOT, rename_context=(jobs, save_jobs, result.get("job_id", "")))
-    if choice:
-        outcome["lyrics_search"] = lyric_response(choice)
-    outcome["lyrics_status"] = lyrics_status
-    outcome["asset_errors"] = asset_errors
-    if asset_errors:
-        outcome["warning"] = "; ".join(problem["message"] for problem in asset_errors)
-        outcome["status"] = "partial" if outcome["status"] in ("saved", "partial") else "failed"
-        if outcome["status"] == "failed":
-            outcome["message"] = outcome["warning"]
-    if wants_lyrics and lyrics_status == original_lyrics.BUSY:
-        outcome["warning"] = (outcome.get("warning", "") + "; 가사 서버 응답 실패: 가사는 추가하지 않았습니다").lstrip("; ")
-        if outcome["status"] == "saved":
-            outcome["status"] = "partial"
+    try:
+        if choice:
+            outcome["lyrics_search"] = lyric_response(choice)
+        outcome["lyrics_status"] = lyrics_status
+        outcome["asset_errors"] = asset_errors
+        if asset_errors:
+            outcome["warning"] = "; ".join(filter(None, [outcome.get("warning")] + [problem["message"] for problem in asset_errors]))
+            outcome["status"] = "partial" if outcome["status"] in ("saved", "partial") else "failed"
+            if outcome["status"] == "failed":
+                outcome["message"] = outcome["warning"]
+        if wants_lyrics and lyrics_status == original_lyrics.BUSY:
+            outcome["warning"] = (outcome.get("warning", "") + "; 가사 서버 응답 실패: 가사는 추가하지 않았습니다").lstrip("; ")
+            if outcome["status"] == "saved":
+                outcome["status"] = "partial"
+    except Exception as exc:
+        storage.postprocess_error(outcome, "저장 응답 생성", exc)
     return outcome
 
 
@@ -695,7 +698,22 @@ def save_job(job_id: str, request: SaveRequest):
         response["save_task_id"] = task_id
         return response
     except Exception as exc:
-        update_save_task(task_id, status="failed", finished_at=time.time(),
+        with save_tasks_lock:
+            task = dict(save_tasks[task_id])
+        outcomes = task.get("results", [])
+        if outcomes and task["processed"] == task["total"]:
+            # All file outcomes are known even if final response construction failed.
+            response = {k: task[k] for k in ("saved", "failed", "skipped", "partial")}
+            response.update(status="partial" if task["saved"] else "failed" if task["failed"] else "unchanged", scope=request.scope,
+                            requested=len(request.paths), results=outcomes,
+                            unchanged=sum(o.get("reason") == "unchanged" for o in outcomes),
+                            unselected=sum(o.get("reason") == "no_selection" for o in outcomes),
+                            errors=[o for o in outcomes if o["status"] in ("failed", "partial")],
+                            state_error="파일 처리 후 응답/상태 기록 오류: " + str(exc), save_task_id=task_id)
+            update_save_task(task_id, status="done", finished_at=time.time(),
+                             current_file="", current_path="", error=str(exc))
+            return response
+        update_save_task(task_id, status="partial" if task["saved"] else "failed", finished_at=time.time(),
                          current_file="", current_path="", error=str(exc))
         raise
 
@@ -733,6 +751,7 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                              current_path=str(MUSIC_ROOT / relative))
             result = results[relative]
             result.setdefault("stored_saved", file_state(result) == "saved")
+            outcome = None
             try:
                 rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
                 result["job_id"] = job_id
@@ -749,9 +768,12 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                 outcome["file_state"] = result["file_state"]
                 result["last_save"] = {k: v for k, v in outcome.items() if k not in ("original", "lyrics_search")}
             except Exception as exc:
-                outcome = {"path": result["path"], "request_path": relative,
-                           "status": "failed", "message": str(exc)}
-                result["last_save"] = outcome
+                if outcome is not None and outcome.get("status") in ("saved", "partial"):
+                    storage.postprocess_error(outcome, "작업 결과 갱신", exc)
+                else:
+                    outcome = {"path": result["path"], "request_path": relative,
+                               "status": "failed", "message": str(exc)}
+                result["last_save"] = {k: v for k, v in outcome.items() if k not in ("original", "lyrics_search")}
             update_save_task(task_id, sub_path=job.get("sub_path", ""),
                              current_file=Path(outcome["path"]).name,
                              current_path=str(MUSIC_ROOT / outcome["path"]))
@@ -760,7 +782,7 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                 counts["saved"] += 1
             if outcome["status"] in ("failed", "skipped", "partial"):
                 counts[outcome["status"]] += 1
-            update_save_task(task_id, processed=len(outcomes), **counts)
+            update_save_task(task_id, processed=len(outcomes), results=list(outcomes), **counts)
         saved = sum(o["status"] in ("saved", "partial") for o in outcomes)
         skipped = sum(o["status"] == "skipped" for o in outcomes)
         failed = sum(o["status"] == "failed" for o in outcomes)
@@ -775,7 +797,7 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                     "errors": [o for o in outcomes if o["status"] in ("failed", "partial")]}
         try:
             save_jobs()
-        except OSError as exc:
+        except Exception as exc:
             response["state_error"] = "파일 처리 결과는 위와 같으나 작업 상태 기록 실패: " + str(exc)
         return response
 
@@ -1001,6 +1023,56 @@ def rename_file(job_id: str, request: RenameRequest):
         storage.OPERATION_LOCK.release()
 
 
+def reconcile_saved_results():
+    """Rebuild save state only from journals whose published music still verifies."""
+    renames, lyrics = rename_service.recovery_records(DATA_ROOT, MUSIC_ROOT)
+    confirmed = {}
+    for _, record in renames:
+        if record["status"] not in ("pending", "complete"):
+            continue
+        old, target = MUSIC_ROOT / record["old_path"], MUSIC_ROOT / record["new_path"]
+        if (not old.exists() and not old.is_symlink() and target.is_file() and not target.is_symlink()
+                and rename_service.identity(target) == record["identity"]
+                and storage.revision(target) == record["revision"]):
+            confirmed.setdefault(record["new_path"], []).append(record)
+    for _, record in lyrics:
+        target = MUSIC_ROOT / record["music"]
+        if (record["status"] in ("pending", "complete") and target.is_file() and not target.is_symlink()
+                and storage.revision(target) == record["after"]):
+            confirmed.setdefault(record["music"], []).append(record)
+    changed = False
+    for job in jobs.values():
+        job_changed = False
+        for row in job.get("results", []):
+            evidence = confirmed.get(row["path"])
+            if not evidence:
+                continue
+            pending = [r for r in evidence if r["status"] == "pending"]
+            last = row.get("last_save", {})
+            if row.get("stored_saved") and not last.get("recovery_pending"):
+                continue
+            outcome = {**last, "path": row["path"], "status": "partial" if pending else "saved",
+                       "music_saved": True, "changed": True, "recovery_pending": bool(pending)}
+            for key in ("warning", "message", "rename_error", "postprocess_errors"):
+                outcome.pop(key, None)
+            if last.get("asset_errors"):
+                outcome["status"] = "partial"
+                outcome["warning"] = "; ".join(problem["message"] for problem in last["asset_errors"])
+            if pending:
+                outcome["warning"] = "음악 저장 완료, 후속 처리 복구 필요: " + "; ".join(r.get("error", "미완료 저널") for r in pending)
+            row.update(original=storage.describe(MUSIC_ROOT / row["path"]), stored_saved=True,
+                       file_state="saved", last_save=outcome)
+            changed = job_changed = True
+        if job_changed:
+            statuses = [r.get("last_save", {}).get("status") for r in job.get("results", [])]
+            saved = sum(status in ("saved", "partial") for status in statuses)
+            failed = statuses.count("failed")
+            job["saved_count"] = saved
+            job["save_status"] = "partial" if "partial" in statuses or (saved and failed) else "failed" if failed else "saved" if saved else "unchanged"
+    if changed:
+        save_jobs()
+
+
 @app.on_event("startup")
 def recover_filename_changes():
     with storage.OPERATION_LOCK:
@@ -1008,7 +1080,8 @@ def recover_filename_changes():
             rename_service.recover(MUSIC_ROOT.resolve(), DATA_ROOT, BACKUP_ROOT, jobs, save_jobs)
             from . import lyric_assets
             lyric_assets.recover(MUSIC_ROOT.resolve(), DATA_ROOT)
-        except storage.StorageError as exc:
+            reconcile_saved_results()
+        except (storage.StorageError, OSError, ValueError) as exc:
             rename_service.blocked[str(DATA_ROOT.resolve())] = str(exc)
             # Reads remain available; path-changing operations fail closed until repaired.
             pass
