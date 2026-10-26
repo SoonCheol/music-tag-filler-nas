@@ -394,6 +394,8 @@ class RecoveryBoundaryTests(unittest.TestCase):
         self._restore(target)
 
     def _plain_move_failure(self, kind):
+        # Recreate an old, unjournaled failure explicitly. New storage.save
+        # no longer uses this sidecar-first writer; these are legacy residues.
         path = self._prepare(edited=True)
         target = Path(tags.rename_target(str(path), tags.Tags(title="Committed", artist="Original singer")))
         old_side, new_side = Path(tags.backup_path(str(path))), Path(tags.backup_path(str(target)))
@@ -407,12 +409,14 @@ class RecoveryBoundaryTests(unittest.TestCase):
                 raise OSError("injected plain " + kind + " move")
             return replace(src, dst, *args, **kwargs)
 
+        self._save(path)
+        folder, manifest = storage._verify_backup(path, self.root, self.backups)
+        alias = {"path": target.name, "checksum": storage.digest((target.name + folder.name + manifest["tags_sha256"]).encode())}
+        storage._new_file(folder / ("alias-" + storage.digest(target.name.encode()) + ".json"), storage._json_bytes(alias))
         with patch.object(storage.os, "replace", side_effect=fail_move):
-            outcome = self._save(path, rename=True)
+            with self.assertRaises(tags.RenameFailed):
+                tags.rename_file(str(path), str(target))
         self.assertEqual(len(calls), 1)
-        self.assertEqual(outcome["status"], "partial")
-        self.assertIn("이름 변경 실패", outcome["rename_error"])
-        self.assertEqual(outcome["path"], path.name)
         self.assertEqual(tags.read_file(str(path)).tags.title, "Committed")
         self.assertFalse(target.exists())
         self.assertFalse(new_side.exists())
@@ -425,7 +429,6 @@ class RecoveryBoundaryTests(unittest.TestCase):
         self.assertEqual(json.loads(aliases[0].read_bytes())["path"], target.name)
         return path, target
 
-    @unittest.expectedFailure
     def test_plain_sidecar_failure_retry_should_not_stall_on_existing_alias(self):
         reached = self._expected_defect_guard()
         path, target = self._plain_move_failure("sidecar")
@@ -440,7 +443,6 @@ class RecoveryBoundaryTests(unittest.TestCase):
         reached.append(True)
         self.assertEqual(retry["status"], "saved")
 
-    @unittest.expectedFailure
     def test_plain_music_failure_retry_should_not_stall_on_existing_alias(self):
         reached = self._expected_defect_guard()
         path, target = self._plain_move_failure("music")
@@ -457,6 +459,7 @@ class RecoveryBoundaryTests(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_plain_failed_sidecar_rollback_should_remain_recoverable(self):
+        # Existing unjournaled residue remains a #017 repair issue.
         reached = self._expected_defect_guard()
         path = self._prepare(edited=True)
         target = Path(tags.rename_target(str(path), tags.Tags(title="Committed", artist="Original singer")))
@@ -472,11 +475,12 @@ class RecoveryBoundaryTests(unittest.TestCase):
                 raise OSError("injected music move and sidecar rollback failure")
             return replace(src, dst, *args, **kwargs)
 
+        self._save(path)
         with patch.object(storage.os, "replace", side_effect=fail_music_and_rollback):
-            outcome = self._save(path, rename=True)
+            with self.assertRaises(tags.RenameFailed) as failure:
+                tags.rename_file(str(path), str(target))
         self.assertEqual(calls, [(path, target), (new_side, old_side)])
-        self.assertEqual(outcome["status"], "partial")
-        self.assertIn(str(new_side), outcome["rename_error"])
+        self.assertEqual(failure.exception.backup, str(new_side))
         self.assertTrue(path.is_file())
         self.assertFalse(target.exists())
         self.assertEqual(new_side.read_bytes(), self.side_bytes)
@@ -497,36 +501,37 @@ class RecoveryBoundaryTests(unittest.TestCase):
         reached.append(True)
         self.assertTrue(recovered, "application recovery left the sidecar detached from existing music")
 
-    @unittest.expectedFailure
     def test_plain_auto_rename_must_preserve_late_external_target_and_sidecar(self):
         reached = self._expected_defect_guard()
         path = self._prepare(edited=True)
-        rename_file = tags.rename_file
+        no_replace = ren.no_replace
         calls = []
         occupant = self.original  # A distinct, valid generated audio file.
         occupant_side = b'{"tags":{},"synthetic_external_backup":true}'
 
         def late_occupant(src, dst):
             target = Path(dst)
-            self.assertFalse(target.exists())
-            self.assertFalse(Path(tags.backup_path(dst)).exists())
-            target.write_bytes(occupant)
-            Path(tags.backup_path(dst)).write_bytes(occupant_side)
-            calls.append(target)
-            return rename_file(src, dst)
+            if Path(src) == path:
+                self.assertFalse(target.exists())
+                self.assertFalse(Path(tags.backup_path(str(dst))).exists())
+                target.write_bytes(occupant)
+                Path(tags.backup_path(str(dst))).write_bytes(occupant_side)
+                calls.append(target)
+            return no_replace(src, dst)
 
-        with patch.object(tags, "rename_file", side_effect=late_occupant):
+        with patch.object(ren, "no_replace", side_effect=late_occupant):
             outcome = self._save(path, rename=True)
         self.assertEqual(len(calls), 1)
         observed = calls[0].read_bytes(), Path(tags.backup_path(str(calls[0]))).read_bytes()
         actual = self.root / outcome["path"]
         self._assert_backup(actual)
-        self.assertEqual(ren.records(self.data), [])
+        self.assertEqual(outcome["status"], "partial")
+        self._rename_record("pending")
+        self.assertIn(str(self.data.resolve()), ren.blocked)
         self._restore(actual)
         reached.append(True)
         self.assertTrue(observed == (occupant, occupant_side), "late external music/sidecar were overwritten")
 
-    @unittest.expectedFailure
     def test_plain_auto_rename_jobs_failure_should_recover_persisted_path(self):
         reached = self._expected_defect_guard()
         path = self._prepare(edited=True)
@@ -534,7 +539,7 @@ class RecoveryBoundaryTests(unittest.TestCase):
         request = main.SaveRequest(**self.request([self.item(row)], rename=True))
         with patch.object(main, "save_jobs", side_effect=OSError("injected final jobs write")) as mocked:
             response = main.save_job("test", request)
-        mocked.assert_called_once()
+        self.assertEqual(mocked.call_count, 3)  # finish, recovery, final batch state
         self.assertEqual(response["saved"], 1)
         self.assertIn("state_error", response)
         actual = self.root / response["results"][0]["path"]
@@ -542,7 +547,7 @@ class RecoveryBoundaryTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self._assert_backup(actual)
         self._assert_jobs(actual.name, path.name)
-        self.assertEqual(ren.records(self.data), [])
+        self._rename_record("pending")
         main.jobs.clear()
         main.jobs["test"] = json.loads(self.disk_jobs)
         self._recover()
@@ -552,7 +557,6 @@ class RecoveryBoundaryTests(unittest.TestCase):
         reached.append(True)
         self.assertEqual(recovered_path, actual.name)
 
-    @unittest.expectedFailure
     def test_lrc_auto_rename_jobs_failure_should_report_existing_new_path(self):
         reached = self._expected_defect_guard()
         path = self._prepare(lrc=True, edited=True)
@@ -566,6 +570,9 @@ class RecoveryBoundaryTests(unittest.TestCase):
         self.assertEqual(mocked.call_count, 2)
         self.assertFalse(path.exists())
         self.assertTrue(target.is_file())
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome["status"], "partial")
+        self.assertEqual(outcome["path"], target.name)
         self._assert_backup(target)
         self.assertEqual(target.with_suffix(".lrc").read_bytes(), lyric_assets.payload(self.timed))
         self._assert_jobs(target.name, path.name)

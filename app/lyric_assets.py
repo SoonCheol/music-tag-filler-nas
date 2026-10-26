@@ -52,8 +52,8 @@ def finish(asset, root):
 
 
 def recover(root, data):
-    for journal in sorted((Path(data) / "lyric-assets").glob("*.json")):
-        record = json.loads(journal.read_text())
+    _, records = rename_service.recovery_records(data, root)
+    for journal, record in records:
         if record["status"] != "pending":
             continue
         if record["root"] != str(Path(root).resolve()):

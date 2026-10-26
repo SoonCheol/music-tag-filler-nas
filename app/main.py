@@ -698,6 +698,10 @@ def save_job(job_id: str, request: SaveRequest):
 
 def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
     with storage.OPERATION_LOCK:
+        try:
+            rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
+        except storage.StorageError as exc:
+            raise HTTPException(409, str(exc))
         if job_id not in jobs:
             raise HTTPException(404, "job not found")
         job = jobs[job_id]
@@ -726,6 +730,7 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
             result = results[relative]
             result.setdefault("stored_saved", file_state(result) == "saved")
             try:
+                rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
                 result["job_id"] = job_id
                 outcome = save_one(result, items[relative], request, lyric_context)
                 outcome["request_path"] = relative
@@ -906,6 +911,7 @@ def file_cover(path: str):
 def revert_file(path: str, request: RevertRequest):
     with storage.OPERATION_LOCK:
         try:
+            rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
             target = storage.resolve_music(MUSIC_ROOT, path)
             outcome = storage.restore(target, MUSIC_ROOT.resolve(), BACKUP_ROOT, request.expected_revision)
             for job in jobs.values():

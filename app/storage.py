@@ -207,6 +207,16 @@ def prepare_cover_change(data, current, max_px=1000):
 
 def save(path, root, backup_root, values, fields, only_empty, expected,
          cover=None, lyrics=None, rename=False, ids=None, replace_lyrics=False, synced=None, lrc=None, asset_root=None, rename_context=None):
+    # Direct callers use the same lock and recovery gate as the HTTP save path.
+    from . import rename_service
+    with OPERATION_LOCK:
+        rename_service.check_ready(asset_root or Path(backup_root).parent, root)
+        return _save_locked(path, root, backup_root, values, fields, only_empty, expected,
+                            cover, lyrics, rename, ids, replace_lyrics, synced, lrc, asset_root, rename_context)
+
+
+def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
+                 cover, lyrics, rename, ids, replace_lyrics, synced, lrc, asset_root, rename_context):
     if revision(path) != expected:
         raise StorageError("스캔/확인 이후 파일이 변경되었습니다. 다시 스캔하세요")
     info = tags.read_file(str(path))
@@ -233,8 +243,6 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
     if only_empty and (info.synced or info.lyrics.strip()):
         lrc = None
     lrc_needed = lyric_assets.needed(path, lrc)
-    if rename and (lrc_needed or path.with_suffix(".lrc").exists()) and rename_context is None:
-        raise StorageError("LRC 연결을 위한 작업 기록이 필요합니다")
     asset = None
     rename_needed = bool(rename and tags.rename_target(str(path), new_tags))
     if new_tags == info.tags and final_ids == info.ids and prepared is None and lyrics is None and synced is None and not lrc_needed and not rename_needed:
@@ -309,29 +317,26 @@ def save(path, root, backup_root, values, fields, only_empty, expected,
     if rename:
         if not content_changed and revision(path) != expected:
             raise StorageError("이름 변경 직전 파일이 변경되었습니다")
-        target = tags.rename_target(str(path), new_tags)
+        from . import rename_service
+        target = rename_service.automatic_target(path, new_tags)
         if target:
-            # Preserve the original backup location, add a verified path alias,
-            # and use upstream's paired music+sidecar rename with rollback.
-            target = Path(target)
             try:
-                if path.with_suffix(".lrc").exists():
-                    from . import rename_service
+                if rename_context is not None:
                     active_jobs, persist_jobs, active_id = rename_context
                     row = next(r for r in active_jobs[active_id]["results"] if r["path"] == str(path.relative_to(root)))
                     row["original"] = describe(path)
-                    rename_service.rename(root, asset_root or Path(backup_root).parent, backup_root, active_jobs, persist_jobs, active_id,
-                                          str(path.relative_to(root)), target.stem, revision(path))
-                    path = target
                 else:
-                    relative = str(target.relative_to(root))
-                    alias = {"path": relative, "checksum": digest((relative + folder.name + manifest["tags_sha256"]).encode("utf-8"))}
-                    _new_file(folder / ("alias-" + digest(relative.encode("utf-8")) + ".json"), _json_bytes(alias))
-                    path = Path(tags.rename_file(str(path), str(target)))
+                    # Standalone storage callers have no job to persist; recovery
+                    # still uses the normal durable journal and backup identity.
+                    active_jobs, persist_jobs, active_id = {}, lambda: None, None
+                event = rename_service.rename(root, asset_root or Path(backup_root).parent, backup_root,
+                                              active_jobs, persist_jobs, active_id,
+                                              str(path.relative_to(root)), target.stem, revision(path))
+                path = root / event["new_path"]
             except Exception as exc:
                 rename_error = "태그는 저장됐으나 이름 변경 실패: " + str(exc)
-                if isinstance(exc, tags.RenameFailed):
-                    rename_error += "; 백업 위치: " + exc.backup
+                if isinstance(exc, rename_service.RenameIncomplete) and exc.current_path is not None:
+                    path = exc.current_path
     return {"status": "partial" if rename_error else "saved", "changed": bool(content_changed or lrc_needed or (rename_needed and rename_error is None)), "path": str(path.relative_to(root)),
             "original": describe(path), "rename_error": rename_error}
 

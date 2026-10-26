@@ -399,3 +399,77 @@ Windows와 구분: #014 Windows 보조 검증은 41 통과/2 건너뜀/1 예상 
 1a 파일 I/O의 **동작 변경 없는 기계적 분리는 진행 가능**하다. 동일 함수/예외·공개 순서·잠금·mock 주입 지점과 현재 suite의 통과/예상 실패 구분을 유지해야 한다. 덮어쓰기와 복구 결함은 분리 작업에 섞어 고치지 말고 별도 안전성 수정 작업을 우선 검토한다.
 
 이번 커밋 대상은 신규 테스트와 계획 문서 두 파일뿐이다. 최종 문서화·커밋 준비 명령이 사용량 한도로 자동 승인 검토를 완료하지 못해 한 차례 실행되지 않았으며, 사용자 계속 지시 후 상태 확인과 기록을 재개했다.
+
+## #016 — 자동 이름 변경 저널 통합 (2026-10-26)
+
+자동 이름 변경을 직접 `tags.rename_file`/`os.replace`하는 경로에서 기존
+`rename_service.rename`의 저널·정체/리비전 확인·no-replace·전진 복구 경로로 통합했다.
+음악·sidecar·LRC의 기존 이름과 대소문자/정규화 충돌을 피하며 `(2)`, `(3)` 번호 규칙을 유지한다.
+이동 직전 외부 대상이 생겨도 덮어쓰지 않는다. 중간 실패에서는 확인된 현재 음악 경로와
+pending 저널을 보존하고 후속 쓰기를 차단한다. 기존 최초 백업 ID/바이트와 작업 문맥을 유지한다.
+직접 `storage.save` 호출도 같은 잠금·복구 차단을 사용하며 작업 문맥 없는 호출을 지원한다.
+
+저장 잠금 획득 뒤, 배치의 곡별 처리 직전, 복원 API의 잠금 내부에서 복구 차단을 재확인한다.
+복구를 시작하기 전에 rename/LRC 저널 전체의 형식·경로·연결을 검증하여 손상된 저널이 있으면
+다른 정상 pending 기록도 먼저 이동하지 않는다. 기존 저널 형식을 유지하고 DB/의존성을 추가하지 않았다.
+
+### 이어하기 및 Python 중단 원인
+
+기존 #016 작업본과 이전 실행 기록을 먼저 확인했다. P13/P14 실행은 실제 exit 0이었고,
+관련 회귀 실행은 exit 1이었다. 대화에 남은 출력이 잘려 최종 결과가 보이지 않았으며,
+이전 대화 자체는 사용량 한도로 종료됐다. 테스트 무한 대기는 재현되지 않았다.
+실시간 출력 및 45초 traceback 진단을 추가한 임시 실행기로 원인을 확인했다.
+
+회귀 오류 2건은 Windows의 심볼릭 링크 생성 권한 부족 `WinError 1314`다.
+`test_revision_job_permissions_symlinks`와
+`test_corrupt_and_symlink_records_are_not_silently_lost`가 실제 링크 생성에서 오류가 났다.
+앱 코드 오류로 확인된 것은 아니지만, 해당 보호 검증을 통과했다고 간주하지 않는다.
+권한/개발자 모드/시스템 설정을 변경하지 않았고 테스트를 skip으로 바꾸지도 않았다.
+
+### 이번 로컬 실행 결과
+
+| 실행 범위 | 실행 | 통과 | 일반 실패 | 오류 | 건너뜀 | 예상 실패 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| P13 + 신규 P14 | 34 | 33 | 0 | 0 | 0 | 1 |
+| P0/P3/P5/P6/P7 + P2 이름 변경 2개 | 86 | 81 | 0 | 2 | 2 | 1 |
+| 합계 (중복 메서드 없음) | **120** | **114** | **0** | **2** | **2** | **2** |
+
+unexpected success 0. 예상 실패는 각각 기존 무저널 sidecar 분리 잔재와
+음악 교체 후 describe 실패의 HTTP failed/partial 보고 불일치이며, 지정된 마지막 assertion까지
+도달한 traceback을 확인했다. 통합으로 해결된 예상 실패 5개만 일반 테스트로 전환했다.
+신규 P14 18개는 음악/sidecar/LRC 이동 직전 충돌, 기존 내용 보존, pending/전진 복구,
+번호 부여, 원본 복원, 작업 문맥, 잠금 대기/배치 후속 곡 차단, 손상 저널 등을 검증한다.
+실패 주입 횟수 및 레거시 writer 미호출도 검사한다.
+
+Windows/Python 3.14의 보조 실행으로, 임시 실행기에만 파일 fsync EBADF 호환,
+디렉터리 sync stub, Windows os.rename 기반 no-replace, pathconf 대체를 적용했다.
+따라서 실제 Linux renameat2/디렉터리 fsync 검증 결과가 아니다.
+P0의 read-only validation mount 및 statvfs 검사 2개는 환경상 건너뛰었다.
+로컬 Docker 실행 파일/엔진과 WSL 배포판이 없어 Linux 재검증은 미수행이다.
+Linux에서 위 오류/skip 4개와 실제 syscall 경로를 #020 통합 검증 시 반드시 재검증한다.
+생성 음원/임시 데이터만 사용했으며 운영 음악/data는 접근·변경하지 않았다.
+
+재현: 프로젝트 루트에서 기존 임시 `.work016/run_windows.py`에 지정한 의존성 경로를 사용하고,
+실시간 출력판 `run_windows_live.py`로 다음 두 suite를 실행했다. 실행기는 별도 작업 공간에
+있으며 앱/테스트 소스, 의존성 목록, Linux 실행 명령은 Windows용으로 바꾸지 않았다.
+
+```text
+P13/P14: test_p13_storage_failures test_p14_storage_rename
+관련 회귀: test_p0_storage test_p3_filename test_p5_command001 test_p6_job_store test_p7_id3
+  test_p2_workflow.P2Tests.test_rename_only_collision_sidecar_and_restore
+  test_p2_workflow.P2Tests.test_http_rename_only_no_candidate_ignores_unselected_values
+```
+
+기존 Node UI 2종(test_ui_save.js, test_p2_ui.js)은 #016 이전 실행에서 통과했고 UI 변경이 없어
+반복하지 않았다. #016 대상 diff --check는 통과했다. 기존 AGENTS.md의 사용자 변경과
+공백 경고, Aider 기록은 보존하고 이번 커밋에서 제외한다.
+
+### 후속 범위 및 배포 상태
+
+- #017: 기존 무저널 alias/sidecar 실패 잔재의 검증·복구 정책. 자동 추측 이동/삭제는 하지 않는다.
+  새 저널 경로를 사용하는 재시도에서 기존 검증된 alias 재사용은 기존 rename_service 동작으로 해결됐다.
+- #018: 작업 경로 영속화와 재시작/LRC 경로 오류의 나머지 조합. 통합에 필수인 현재 경로 전달과
+  기존 전진 복구 연결은 이번에 처리했지만 모든 작업 기록 실패 계약을 확대 수정하지 않았다.
+- 음악 완료 후 describe 실패의 응답 계약은 #019에 남긴다.
+- NAS 접속/배포 및 GitHub push 없음. #016 코드·로컬 검증 기록만 로컬 커밋한다.
+  실제 Linux 통합 검증·배포는 기존 #020 범위이며 이번 결과로 완료 처리하지 않는다.

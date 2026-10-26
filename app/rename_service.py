@@ -16,15 +16,107 @@ active = {}
 blocked = {}
 
 
+class RenameIncomplete(storage.StorageError):
+    """A failed transaction may already have moved the verified music file."""
+    def __init__(self, message, current_path=None):
+        super().__init__(message)
+        self.current_path = current_path
+
+
+def journal_records(data, kind):
+    """Validate every record before recovery performs any filesystem mutation."""
+    folder = Path(data) / kind
+    try:
+        if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
+            raise ValueError("invalid journal directory")
+        values = []
+        for path in sorted(folder.glob("*.json")):
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("invalid journal file")
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, dict) or record.get("status") not in ("pending", "complete", "aborted"):
+                raise ValueError("invalid journal status")
+            root = Path(record["root"])
+            if not root.is_absolute() or root != root.resolve():
+                raise ValueError("invalid journal root")
+
+            def relative(key):
+                value = record[key]
+                if not isinstance(value, str) or not value or "\x00" in value:
+                    raise ValueError("invalid journal path")
+                rel = Path(value)
+                if rel.is_absolute() or rel.drive or ".." in rel.parts or not rel.name:
+                    raise ValueError("invalid journal path")
+                target = root / rel
+                if not target.resolve().is_relative_to(root):
+                    raise ValueError("journal path outside root")
+                parent = root
+                for part in rel.parts:
+                    parent /= part
+                    if parent.is_symlink():
+                        raise ValueError("symlink in journal path")
+                return target
+
+            def sha(key):
+                if not isinstance(record.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", record[key]):
+                    raise ValueError("invalid journal checksum: " + key)
+
+            if kind == "renames":
+                old, new = relative("old_path"), relative("new_path")
+                if old == new or old.parent != new.parent or old.suffix != new.suffix:
+                    raise ValueError("invalid rename paths")
+                sha("revision")
+                if (type(record["seq"]) is not int or record["seq"] < 1
+                        or not isinstance(record["id"], str) or not re.fullmatch(r"[0-9a-f]{32}", record["id"])
+                        or not isinstance(record["identity"], list) or len(record["identity"]) != 2
+                        or any(type(n) is not int or n < 0 for n in record["identity"])):
+                    raise ValueError("invalid rename identity")
+                if record["backup_id"] is not None:
+                    for key in ("backup_id", "side_sha", "tags_sha"):
+                        sha(key)
+                elif record["side_sha"] is not None or record["tags_sha"] is not None:
+                    raise ValueError("invalid backup association")
+                if record.get("lrc_sha") is not None:
+                    sha("lrc_sha")
+            else:
+                if relative("lrc") != relative("music").with_suffix(".lrc"):
+                    raise ValueError("invalid LRC association")
+                sha("before")
+                sha("after")
+                if not isinstance(record["text"], str) or not record["text"].strip():
+                    raise ValueError("invalid LRC payload")
+            values.append((path, record))
+        if kind == "renames" and (len({r["seq"] for _, r in values}) != len(values)
+                                  or len({r["id"] for _, r in values}) != len(values)):
+            raise ValueError("duplicate rename sequence or identity")
+        return values
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        raise storage.StorageError("복구 저널을 안전하게 해석할 수 없습니다: " + str(folder) + ": " + str(exc)) from exc
+
+
 def records(data):
-    folder = Path(data) / "renames"
-    return [(p, json.loads(p.read_text(encoding="utf-8"))) for p in sorted(folder.glob("*.json"))]
+    return journal_records(data, "renames")
 
 
-def check_ready(data):
-    message = blocked.get(str(Path(data).resolve()))
+def recovery_records(data, root=None):
+    renames, lyrics = records(data), journal_records(data, "lyric-assets")
+    if root is not None and any(r["root"] != str(Path(root).resolve()) for _, r in renames + lyrics):
+        raise storage.StorageError("복구 기록의 음악 루트가 다릅니다")
+    return renames, lyrics
+
+
+def check_ready(data, root=None):
+    key = str(Path(data).resolve())
+    message = blocked.get(key)
     if message:
         raise storage.StorageError("이름 변경 복구 확인 필요: " + message)
+    try:
+        renames, lyrics = recovery_records(data, root)
+        if any(r["status"] == "pending" for _, r in renames + lyrics):
+            raise storage.StorageError("미완료 음악/이름 변경 저널의 복구가 필요합니다")
+    except storage.StorageError as exc:
+        blocked[key] = str(exc)
+        raise
 
 
 def sync_dir(path):
@@ -58,6 +150,21 @@ def no_replace(source, target):
 
 def folded(name):
     return unicodedata.normalize("NFC", name).casefold()
+
+
+def automatic_target(source, new_tags):
+    target = tags.rename_target(str(source), new_tags)
+    if target is None:
+        return None
+    target = Path(target)
+    stem = tags.safe_filename(f"{new_tags.artist} - {new_tags.title}" if new_tags.artist else new_tags.title)
+    occupied = {folded(p.name) for p in source.parent.iterdir()}
+    number = 2
+    while any(folded(p.name) in occupied for p in
+              (target, Path(tags.backup_path(str(target))), target.with_suffix(".lrc"))):
+        target = source.with_name(f"{stem} ({number}){source.suffix}")
+        number += 1
+    return target
 
 
 def validate_name(source, stem):
@@ -135,14 +242,16 @@ def finish(record, path, root, backups, jobs, save_jobs):
         storage._verify_backup(new, root, backups)
     elif old_side.exists() or new_side.exists() or new_side.is_symlink():
         raise storage.StorageError("예상하지 못한 동반 백업이 있습니다")
+    old_lrc, new_lrc = old.with_suffix(".lrc"), new.with_suffix(".lrc")
     if record.get("lrc_sha"):
-        old_lrc, new_lrc = old.with_suffix(".lrc"), new.with_suffix(".lrc")
         if old_lrc.exists():
             if old_lrc.is_symlink() or storage.revision(old_lrc) != record["lrc_sha"]:
                 raise storage.StorageError("연결된 LRC 내용 불일치")
             no_replace(old_lrc, new_lrc)
         if new_lrc.is_symlink() or not new_lrc.is_file() or storage.revision(new_lrc) != record["lrc_sha"]:
             raise storage.StorageError("새 이름의 LRC를 확인할 수 없습니다")
+    elif any(p.exists() or p.is_symlink() for p in (old_lrc, new_lrc)):
+        raise storage.StorageError("예상하지 못한 LRC가 있습니다")
     update_jobs(jobs, record["old_path"], record["new_path"], root)
     save_jobs()
     record["status"] = "complete"
@@ -155,7 +264,8 @@ def recover(root, data, backups, jobs, save_jobs):
     key = str(Path(data).resolve())
     blocked.pop(key, None)
     try:
-        for path, record in records(data):
+        renames, _ = recovery_records(data, root)
+        for path, record in renames:
             if record["status"] in ("complete", "aborted"):
                 continue
             if record["root"] != str(Path(root).resolve()):
@@ -174,9 +284,9 @@ def recover(root, data, backups, jobs, save_jobs):
 
 
 def rename(root, data, backups, jobs, save_jobs, job_id, relative, stem, revision):
-    check_ready(data)
+    check_ready(data, root)
     row = next((r for r in jobs.get(job_id, {}).get("results", []) if r.get("path") == relative), None)
-    if row is None:
+    if row is None and job_id is not None:
         raise storage.StorageError("이 작업에 속한 파일이 아닙니다")
     source = storage.resolve_music(root, relative)
     # No symlinked parent directories, even if they lead back inside the root.
@@ -185,7 +295,7 @@ def rename(root, data, backups, jobs, save_jobs, job_id, relative, stem, revisio
         parent /= part
         if parent.is_symlink():
             raise storage.StorageError("심볼릭 링크 폴더에서는 이름을 변경할 수 없습니다")
-    if storage.revision(source) != revision or row.get("original", {}).get("revision") != revision:
+    if storage.revision(source) != revision or (row is not None and row.get("original", {}).get("revision") != revision):
         raise storage.StorageError("파일이 변경되었습니다. 다시 확인하세요")
     target = validate_name(source, stem)
     if source == target:
@@ -230,7 +340,15 @@ def rename(root, data, backups, jobs, save_jobs, job_id, relative, stem, revisio
         except Exception:
             pass
         existing = [str(p) for p in (source, target) if p.exists() or p.is_symlink()]
-        raise storage.StorageError("이름 변경/기록 복구 오류: " + str(exc) + "; 현재 존재하는 경로: " + ", ".join(existing)) from exc
+        current = None
+        try:
+            candidates = [p for p in (source, target) if p.is_file() and not p.is_symlink()
+                          and identity(p) == record["identity"] and storage.revision(p) == record["revision"]]
+            if len(candidates) == 1:
+                current = candidates[0]
+        except OSError:
+            pass
+        raise RenameIncomplete("이름 변경/기록 복구 오류: " + str(exc) + "; 현재 존재하는 경로: " + ", ".join(existing), current) from exc
 
 
 def changes(data, after):
