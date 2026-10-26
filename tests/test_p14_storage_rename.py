@@ -129,7 +129,7 @@ class AutoRenameTests(unittest.TestCase):
         with patch.object(ren, "no_replace", side_effect=collide):
             outcome = self._save(path, rename=True, rename_context=(main.jobs, main.save_jobs, "test"))
         self.assertEqual(len(collisions), 1)
-        self.assertEqual(len(calls), 2 if kind == "lrc" else 1)
+        self.assertEqual(len(calls), 1)  # Recovery rejects the occupied target before another move.
         self.assertEqual(collisions[0].read_bytes(), b"external " + kind.encode())
         self.assertEqual(source_asset.read_bytes(), source_bytes)
         actual = self.root / outcome["path"]

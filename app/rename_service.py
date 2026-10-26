@@ -78,6 +78,12 @@ def journal_records(data, kind):
                     raise ValueError("invalid backup association")
                 if record.get("lrc_sha") is not None:
                     sha("lrc_sha")
+                for key, checksum in (("side_identity", "side_sha"), ("lrc_identity", "lrc_sha")):
+                    if key in record and record[key] is not None:
+                        value = record[key]
+                        if (not record.get(checksum) or not isinstance(value, list) or len(value) != 2
+                                or any(type(n) is not int or n < 0 for n in value)):
+                            raise ValueError("invalid asset identity")
             else:
                 if relative("lrc") != relative("music").with_suffix(".lrc"):
                     raise ValueError("invalid LRC association")
@@ -215,6 +221,44 @@ def update_jobs(jobs, old, new, root):
             job["missing_paths"] = [new if p == old else p for p in job["missing_paths"]]
 
 
+def ensure_alias(folder, relative, tags_sha):
+    """Reuse only a verified alias; create-only publication also handles a race."""
+    alias = {"path": relative, "checksum": storage.digest((relative + folder.name + tags_sha).encode())}
+    path = folder / ("alias-" + storage.digest(relative.encode()) + ".json")
+    created = False
+    if not path.exists() and not path.is_symlink():
+        try:
+            storage._new_file(path, storage._json_bytes(alias))
+            created = True
+        except FileExistsError:
+            pass  # Another publisher won; validate its data before reusing it.
+    try:
+        if path.is_symlink() or not path.is_file() or json.loads(path.read_bytes()) != alias:
+            raise ValueError("alias mismatch")
+    except (OSError, ValueError) as exc:
+        raise storage.StorageError("기존 백업 별칭이 일치하지 않습니다") from exc
+    # A prior attempt may have published the alias but failed this sync.
+    sync_dir(folder)
+    return created
+
+
+def finish_asset(old, new, checksum, expected_identity=None):
+    """Resume a journaled asset move without replacing or adopting another file."""
+    if any(folded(p.name) == folded(new.name) and p.name != new.name for p in new.parent.iterdir()):
+        raise storage.StorageError("동반 파일 이름 충돌")
+    if old.exists() or old.is_symlink():
+        if (old.is_symlink() or not old.is_file() or storage.revision(old) != checksum
+                or (expected_identity is not None and identity(old) != expected_identity)):
+            raise storage.StorageError("이전 동반 파일 정체 또는 내용 불일치")
+        if new.exists() or new.is_symlink():
+            raise storage.StorageError("동반 파일 충돌")
+        no_replace(old, new)
+    if (new.is_symlink() or not new.is_file() or storage.revision(new) != checksum
+            or (expected_identity is not None and identity(new) != expected_identity)):
+        raise storage.StorageError("새 동반 파일 정체 또는 내용 불일치")
+    sync_dir(new.parent)
+
+
 def finish(record, path, root, backups, jobs, save_jobs):
     old, new = Path(root) / record["old_path"], Path(root) / record["new_path"]
     if old.exists() or old.is_symlink() or new.is_symlink() or not new.is_file():
@@ -223,33 +267,15 @@ def finish(record, path, root, backups, jobs, save_jobs):
         raise storage.StorageError("새 경로의 파일 정체 또는 내용이 일치하지 않습니다: " + str(new))
     old_side, new_side = Path(tags.backup_path(str(old))), Path(tags.backup_path(str(new)))
     if record["backup_id"]:
-        if old_side.exists():
-            if new_side.exists() or new_side.is_symlink() or storage.revision(old_side) != record["side_sha"]:
-                raise storage.StorageError("동반 백업 충돌 또는 내용 불일치")
-            no_replace(old_side, new_side)
-        if not new_side.is_file() or new_side.is_symlink() or storage.revision(new_side) != record["side_sha"]:
-            raise storage.StorageError("새 이름의 동반 백업을 확인할 수 없습니다")
+        finish_asset(old_side, new_side, record["side_sha"], record.get("side_identity"))
         folder = Path(backups) / record["backup_id"]
-        relative = record["new_path"]
-        alias = {"path": relative, "checksum": storage.digest((relative + folder.name + record["tags_sha"]).encode())}
-        alias_path = folder / ("alias-" + storage.digest(relative.encode()) + ".json")
-        if alias_path.exists():
-            if alias_path.is_symlink() or alias_path.read_bytes() != storage._json_bytes(alias):
-                raise storage.StorageError("기존 백업 별칭이 일치하지 않습니다")
-        else:
-            storage._new_file(alias_path, storage._json_bytes(alias))
-            sync_dir(folder)
+        ensure_alias(folder, record["new_path"], record["tags_sha"])
         storage._verify_backup(new, root, backups)
-    elif old_side.exists() or new_side.exists() or new_side.is_symlink():
+    elif any(p.exists() or p.is_symlink() for p in (old_side, new_side)):
         raise storage.StorageError("예상하지 못한 동반 백업이 있습니다")
     old_lrc, new_lrc = old.with_suffix(".lrc"), new.with_suffix(".lrc")
     if record.get("lrc_sha"):
-        if old_lrc.exists():
-            if old_lrc.is_symlink() or storage.revision(old_lrc) != record["lrc_sha"]:
-                raise storage.StorageError("연결된 LRC 내용 불일치")
-            no_replace(old_lrc, new_lrc)
-        if new_lrc.is_symlink() or not new_lrc.is_file() or storage.revision(new_lrc) != record["lrc_sha"]:
-            raise storage.StorageError("새 이름의 LRC를 확인할 수 없습니다")
+        finish_asset(old_lrc, new_lrc, record["lrc_sha"], record.get("lrc_identity"))
     elif any(p.exists() or p.is_symlink() for p in (old_lrc, new_lrc)):
         raise storage.StorageError("예상하지 못한 LRC가 있습니다")
     update_jobs(jobs, record["old_path"], record["new_path"], root)
@@ -319,7 +345,9 @@ def rename(root, data, backups, jobs, save_jobs, job_id, relative, stem, revisio
               "status": "pending", "root": str(Path(root).resolve()), "old_path": relative,
               "new_path": target.relative_to(root).as_posix(), "revision": revision,
               "identity": identity(source), "backup_id": backup_id, "side_sha": side_sha, "tags_sha": tags_sha,
-              "created_at": time.time(), "lrc_sha": lrc_sha}
+              "created_at": time.time(), "lrc_sha": lrc_sha,
+              "side_identity": identity(side) if backup_id else None,
+              "lrc_identity": identity(lrc) if lrc_sha else None}
     folder = Path(data) / "renames"
     folder.mkdir(exist_ok=True)
     sync_dir(folder.parent)

@@ -473,3 +473,63 @@ P13/P14: test_p13_storage_failures test_p14_storage_rename
 - 음악 완료 후 describe 실패의 응답 계약은 #019에 남긴다.
 - NAS 접속/배포 및 GitHub push 없음. #016 코드·로컬 검증 기록만 로컬 커밋한다.
   실제 Linux 통합 검증·배포는 기존 #020 범위이며 이번 결과로 완료 처리하지 않는다.
+
+## #017 — alias 멱등성 및 sidecar 복구 안전성 (2026-10-26)
+
+기준 커밋 `7b7c166`. 기존 AGENTS/Aider 변경은 보존하고 이번 커밋에서 제외한다.
+운영 수정은 `app/rename_service.py` 하나로 제한했다. 새 모듈/DB/의존성 없음.
+
+- alias의 path/checksum 객체를 검증해 같은 내용을 재사용한다. JSON 공백/키 순서가 달라도
+  정상 alias의 원래 바이트·수정시간을 유지한다. 신규 생성 여부를 반환하고 기존 다른 alias도 보존한다.
+- create-only 공개 직전 다른 파일이 생성된 경쟁에서는 실제 승자의 내용을 다시 검증한다.
+  내용 불일치·일반 파일이 아닌 대상·symlink는 충돌로 처리하며 덮어쓰거나 삭제하지 않는다.
+  alias가 이미 있어도 디렉터리 sync를 재시도해 이전 공개 후 sync 오류를 넘겨버리지 않는다.
+- sidecar/LRC 이동과 복구는 기존 rename 저널 내부에서만 진행한다. 재시도 시 출발/도착 파일의
+  hash와 정체를 검사하고 정확한 이름 및 casefold/NFC 충돌을 다시 확인한다. 이동 직후 오류가
+  발생해도 같은 파일의 이동을 반복하지 않으며, 모호한 상태는 pending/쓰기 차단으로 보존한다.
+- 신규 저널에 선택 필드 `side_identity`, `lrc_identity`를 추가했다. 같은 바이트를 가진 다른 파일을
+  이동 또는 완료된 대상으로 채택하지 않는다. 기존 필드/저널 형식은 유지하며, 정체 필드가 없는
+  구 저널은 종전 hash 검증으로 복구한다. 구 코드도 선택 필드를 무시할 수 있으나 추가 보호는 적용하지 않는다.
+
+### 무저널 처리 경로 조사
+
+NAS 활성 저장/자동 rename은 이미 #016에서 storage.save → rename_service.rename으로 통합되어
+음악·sidecar·LRC 이동을 저널로 기록한다. 남은 upstream.pipeline.save_file → tags.rename_file은
+보존된 upstream 저장 흐름이며 현재 NAS 저장 API의 호출 경로가 아니다. 검색에서 pipeline을 import하지만
+save_file을 호출하지 않는다. 이 레거시 함수를 NAS 백업 규격에 억지로 연결하거나 수정하지 않았다.
+최초 백업 생성의 sidecar 공개는 storage._new_file의 create-only 처리이며 이름 변경 경로가 아니다.
+
+### 검증 결과
+
+생성 음원/임시 데이터만 사용했다. Windows 보조 실행기는 #016과 동일하게 파일 fsync EBADF 호환,
+디렉터리 sync stub, Windows os.rename no-replace 및 pathconf 대체를 적용했다.
+실제 Linux syscall/디렉터리 fsync·심볼릭 링크 통합 검증은 #020에서 수행한다.
+
+| 최종 테스트 정의 기준, 중복 제외 | 실행 | 통과 | 일반 실패 | 오류 | skip | 예상 실패 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| P13 + P14 (#016 보호) | 34 | 33 | 0 | 0 | 0 | 1 |
+| 신규 P15 alias/sidecar | 12 | 12 | 0 | 0 | 0 | 0 |
+| P0 3개 + P3 4개 + P5 18개 | 25 | 25 | 0 | 0 | 0 | 0 |
+| 합계 | **71** | **70** | **0** | **0** | **0** | **1** |
+
+처음 P13/P14/P15 실행 중 기존 LRC 충돌 테스트 1개는 주입 횟수 기대치(2회)로 실패했다.
+복구가 대상 존재를 먼저 검사하므로 두 번째 no_replace에 진입하지 않는 것이 새 안전 동작이다.
+외부 파일 내용·pending·복구·원본 복원 assertion은 유지하고 기대치를 1회로 수정한 뒤 해당 테스트를
+재실행해 통과했다. P15의 sidecar/LRC 교체 하위 사례는 최종 별도 메서드로 분리해 둘 다 통과했다.
+이후 신규/수정 메서드만 재검사했으며 통과한 무관 회귀는 반복하지 않았다. unexpected success 0.
+
+P15는 정상 alias 비재작성/신규 구분·다른 alias 보존, create 직전 정상/불일치 경쟁,
+alias 공개 뒤 sync 오류·복구 재sync, 불일치 alias 반복 차단, sidecar 이동 직후 오류와 재시작,
+동일 바이트의 다른 sidecar/LRC 정체 차단, 도착 sidecar 교체, 복구 시 folded 이름 충돌,
+구 저널 호환, 잘못된 정체 필드 차단을 검사했다. 실패 주입 도달 횟수 및 최초 원본의 정확 복원을 확인했다.
+
+### 남은 위험/후속 범위
+
+- 유일한 기존 예상 실패: 저널 없이 음악과 분리된 옛 sidecar 잔재의 자동 복구. 생성 fixture에서
+  마지막 `application recovery left the sidecar detached` assertion임을 확인했다. 이동 근거가 없는
+  잔재를 추측해 되돌리거나 삭제하지 않는다. 최초 백업은 보존되지만 안전한 수동 확인/복구가 필요하다.
+- 구 저널에는 sidecar/LRC inode 정체가 없어 hash 검증만 가능하다. 외부 SMB 프로그램의 동시 교체를
+  앱 잠금이 막지는 못하며, casefold/NFC 검사는 폴더 사전 검사이므로 외부 경쟁 전체의 원자성을 보장하지 않는다.
+  정확한 대상 이름의 no-replace 및 부분 완료 저널 보호는 유지한다.
+- #018의 나머지 작업 경로 영속화/복구, #019의 음악 완료 후 결과 보고, #020 Linux 통합 검증은 별도다.
+- NAS 접속/배포·GitHub push 없음. 실제 운영 음악/data 변경 없음. 이번 로컬 검증 결과로 Linux 검증을 대체하지 않는다.
