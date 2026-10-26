@@ -305,3 +305,97 @@ Windows 보조 실행 재현: 프로젝트 루트에서 TEMP 의존성 경로를
 0b(LRC/rename/기록의 교체 후 실패) 테스트 설계·작성은 진행 가능하다. 다만 실제 Linux 저널/renameat2 경로 실행은 Linux 환경 확보 후 검증해야 하며, 구조 분리 단계 진입 전에는 0a의 정규 Linux 재검증도 완료해야 한다.
 
 커밋 대상은 `tests/test_p0_storage.py`, `docs/STORAGE_REFACTOR_PLAN.md` 두 파일뿐이다. 기존 AGENTS/Aider 변경은 보존한다. 전체 diff --check의 AGENTS.md 공백 경고는 기존 변경에서 발생했으며 이 작업의 검사 대상과 구분한다.
+
+## #015 진행 기록 — Linux 재검증 및 0b
+
+상태: 실제 작업본 HEAD efe985e 확인, 기존 AGENTS/Aider 변경 보존. #014 커밋이 HEAD이며 운영 코드는 변경되지 않았다.
+기존 P0_VALIDATION.md의 NAS 격리 검증 방식을 사용한다. 운영 서비스 배포가 아니라 별도 `/tmp/music-tag-015-4d25d384` 소스 폴더와 일회성 컨테이너만 사용한다. source-only archive SHA256 `156da8e52aab346265bc2c1e42e7aaef6b760aed09b5e6dfdd3ecdbe8f6b95ca`를 전송 전후 대조했다.
+이미지 ID `sha256:fec14793b0533bb4bbaf2ca4eb5fdf46c1051e377f369adcf0e6b96753f8d90f`, Docker Linux 29.6.2. `--network none --read-only --tmpfs /tmp:rw,size=512m`, 소스 `/workspace:ro`, PYTHONPATH=/workspace:/workspace/tests. 운영 music/data 볼륨 및 포트 공개 없음. fsync/sync_dir/renameat2 Windows 호환 stub 없음.
+1차 Linux 실행: P0 36개 + ID3 8개 = 44개, 통과 43 / 일반 실패 0 / 오류 0 / skip 0 / expectedFailure 1. #014 신규 11개가 포함된다. exact expectedFailure traceback 및 0b 신규 테스트는 다음 단위에서 별도 확인한다.
+
+### #015 0b 1차 검증 완료
+
+Linux 신규 테스트 15개 실행: 통과 10 / 일반 실패 0 / 오류 0 / skip 0 / 예상 실패 5. 저널 생성·완료 기록, LRC 공개, journaled 음악/sidecar/LRC 이동, 기록 저장·전진 복구의 정상 보호를 확인했다. 예상 실패는 미리 지정한 마지막 assertion까지 도달해야 cleanup도 통과한다.
+새 결함 후보: 무저널 자동 rename의 잔여 alias 때문에 실패 후 재시도가 멈춤(이동 두 경계), 검사 뒤 생성된 대상 음악/sidecar 덮어쓰기, 무저널 rename 후 jobs 저장 실패와 기록 reload 시 경로 복구 누락, LRC 자동 rename에서 jobs 실패 후 사라진 옛 경로 describe 오류. 운영 코드 수정 없음. 다음 검증에서 정확한 예상 실패 traceback과 관련 P0/P3/P5/P6/P7 회귀를 확인한다.
+추가 보강: 음악 이동과 sidecar rollback이 모두 실패하는 경우의 분리된 sidecar 및 앱 복구 누락을 별도 테스트로 추가하고, alias 재시도 결함은 Errno 17/alias 경로까지 검사한다.
+
+### #015 최종 결과 — Linux 재검증 및 0b 완료
+
+**0a Linux 재검증과 0b 테스트 작성·관련 Linux 회귀를 완료했다. 운영 코드·운영 음악/data·서비스는 변경하지 않았다. NAS 배포·GitHub push 없음.** 이 절의 Linux 결과가 #014의 Linux 미검증 상태를 해소한다. 이전 Windows 보조 실행 기록은 당시 결과로 유지한다.
+
+#### 환경과 실행 근거
+
+- 실제 작업본 기준 커밋 efe985e. 기존 AGENTS/Aider 변경은 보존하고 커밋에서 제외한다.
+- 기존 NAS 격리 Docker 환경의 별도 `/tmp/music-tag-015-4d25d384/round2` 소스와 일회성 컨테이너 사용. 운영 소스/컨테이너/stack/이미지 태그는 갱신하지 않았다.
+- 최종 소스 archive SHA256 `b724f4e6567340a92ec003ce4746d18a052f5e1ec265e31df62c4eff19fe121f`를 전송 전후 확인했다. 앱/테스트 Python 소스·static/index.html·신규 테스트·임시 결과 출력기만 포함하고 비밀 설정·음악·운영 data는 제외했다. 최종 기록 전 현재 신규 테스트 bytes와 Linux에서 실행한 archive의 해당 파일이 동일함을 재확인했다.
+- 이미지 ID `sha256:fec14793b0533bb4bbaf2ca4eb5fdf46c1051e377f369adcf0e6b96753f8d90f`. Linux/Python 3.11.17, FastAPI 0.110.0, Starlette 0.36.3, Uvicorn 0.29.0, Mutagen 1.47.0, Pillow 10.3.0, Pydantic 2.14.1.
+- 실제 storage/tags/rename_service import가 `/workspace/app/...`임을 확인했다. 이미지 내 옛 앱 대신 현재 작업본 복사본으로 검증했다.
+- root와 소스는 read-only, 테스트 쓰기는 컨테이너 `/tmp` tmpfs. `--network none`, 공개 포트 없음, 운영 `/music`·`/data` 마운트 없음. 생성 음악·저널·작업 기록만 TemporaryDirectory에서 사용했다.
+- Windows fsync 우회/sync_dir stub 없이 실제 Linux 파일/디렉터리 fsync, hard link, os.replace, renameat2 경로를 실행했다. 각 테스트의 지정된 실패 경계만 mock했다.
+
+재현 명령:
+
+```sh
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,size=512m \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e PYTHONPATH=/workspace:/workspace/tests \
+  --mount type=bind,source=/tmp/music-tag-015-4d25d384/round2,target=/workspace,readonly \
+  -w /workspace \
+  sha256:fec14793b0533bb4bbaf2ca4eb5fdf46c1051e377f369adcf0e6b96753f8d90f \
+  python -B -m unittest test_p0_storage test_p3_filename test_p5_command001 \
+    test_p6_job_store test_p7_id3 test_p13_storage_failures -q
+```
+
+실제 최종 실행은 동일 unittest suite를 임시 `verify_results.py`로 로드해 예상 실패 assertion 원인과 전체 수를 출력했다. 이 실행기는 운영 함수/테스트를 patch하지 않았으며 예상 실패 7개도 검사했다. 임시 소스 archive/실행기/검증 디렉터리는 커밋·배포 대상이 아니다.
+
+#### 결과 수 (메서드 기준, subTest 중복 합산 없음)
+
+| 구분 | 실행 | 통과 | 일반 실패 | 오류 | 건너뜀 | 예상 실패 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| #014 Linux 1차 P0+ID3 | 44 | 43 | 0 | 0 | 0 | 1 |
+| 최종 중 #014 신규 11개 | 11 | 10 | 0 | 0 | 0 | 1 |
+| 최종 중 #015 신규 0b | 16 | 10 | 0 | 0 | 0 | 6 |
+| 최종 Linux 관련 회귀 전체 | **100** | **93** | **0** | **0** | **0** | **7** |
+
+최종 구성은 P0 36, P3 filename 11, P5 command001 18, P6 job_store 11, P7 ID3 8, 신규 P13 16개다. 최초 44개와 중간 15개는 최종 100개에 포함되므로 합산하지 않는다. unexpected success는 0이다.
+
+Windows와 구분: #014 Windows 보조 검증은 41 통과/2 건너뜀/1 예상 실패(44개)였다. 이번 #015는 실제 Linux 93 통과/0 건너뜀/7 예상 실패(100개)다. 이번에 새 Windows 결과를 주장하지 않는다. 기존 readonly/statvfs 두 테스트도 Linux에서 건너뜀 없이 실행됐다. #014 기존 예상 실패는 Linux에서도 마지막 `'failed' != 'partial'` assertion으로 재현됐으며 실제 음악 변경·백업 검증·복원·주입 확인을 먼저 통과했다.
+
+#### 신규 테스트와 보호 범위
+
+신규 `tests/test_p13_storage_failures.py`의 `RecoveryBoundaryTests` 16개:
+
+| 경계 | 테스트 수 | 확인 내용 | 결과 |
+| --- | ---: | --- | --- |
+| LRC 저널 생성/공개 후 sync 실패 | 2 | 음악 미교체, 임시 파일 정리, pending→aborted, 재시도 complete, 원본 복원 | 통과 2 |
+| 음악 교체 후 LRC 공개 실패 | 1 | 실제 음악 변경, 두 번의 주입, pending/차단, 전진 복구, 중복 복구 불변 | 통과 1 |
+| LRC complete 기록의 영구/일시 실패 | 2 | 이미 생성된 LRC 보존, inode/mtime, 내부 재시도와 후속 recovery | 통과 2 |
+| 저널 경로의 음악/sidecar/LRC 이동 실패 | 3 | aborted 또는 pending/차단, 실제 이동 상태·백업·sidecar, 재시도/전진 복구 | 통과 3 |
+| 저널 경로의 jobs/complete 기록 실패 | 2 | 메모리/디스크 경로 차이, fixture 기록 reload 후 복구, 중복 실행, 원본 복원 | 통과 2 |
+| 무저널 자동 이동 실패 후 alias 재시도 | 2 | sidecar 실패 및 음악 실패+rollback; 잔여 alias의 Errno 17 확인 | 예상 실패 2 |
+| 무저널 자동 rename의 늦은 대상 생성 | 1 | 검사 후 생성 음악·합성 sidecar를 둔 실제 교체 경로, 대상 보존 계약 | 예상 실패 1 |
+| 무저널 rename 후 jobs 저장 실패 | 1 | state_error, 실제 새 경로/옛 디스크 기록, reload·recovery 후 연결 | 예상 실패 1 |
+| LRC 자동 rename 후 jobs 저장 실패 | 1 | 새 음악/sidecar/LRC 및 pending, 옛 경로 조회 오류, 이후 전진 복구 | 예상 실패 1 |
+| 무저널 음악 이동·sidecar rollback 이중 실패 | 1 | 옛 음악/새 이름 sidecar 분리, 앱 recovery, 원본 복원 가능성 | 예상 실패 1 |
+
+현재/최초 음악 bytes와 경로, 최초 원본·manifest·tags bytes, sidecar 및 `_verify_backup`, LRC bytes/저널, jobs 메모리와 생성 디스크 기록을 확인했다. mock의 대상·횟수·내용, 내부 재시도, 임시 파일 정리와 예외/응답도 확인했다. 신규 예상 실패는 마지막 원하는 계약 assertion에 도달했는지 cleanup guard로 검사하므로 준비 실패나 mock 미도달이 예상 실패에 가려지면 별도 실패한다. 기존 실패 주입·보호 테스트는 수정하지 않았다.
+
+#### 기존/신규 결함 (운영 코드 자동 수정 없음)
+
+- **기존 STORAGE-014-01:** 음악 교체 후 최종 describe OSError → 실제 음악 변경·백업 정상인데 일반 failed 보고. Linux에서도 확인. 신규 결함으로 중복 집계하지 않는다.
+- **STORAGE-015-01 / 중간:** LRC 없는 자동 rename이 alias를 먼저 생성한다. sidecar 또는 음악 이동 실패 후 rollback돼도 alias가 남아 같은 대상 재시도에서 `_new_file(alias)` FileExistsError/Errno 17이 발생하고 partial이 반복된다. 2개 테스트로 재현했으며 음악/최초 백업과 정확 복원은 유지된다.
+- **STORAGE-015-02 / 높음:** LRC 없는 자동 경로는 대상 검사 후 os.replace를 사용한다. 검사와 실제 rename 사이에 별도 생성 음악/sidecar를 넣었더니 둘 다 덮어써졌다. 실제 동시 프로세스 시험은 아니지만 충돌 상태와 실제 파일 손실을 생성 fixture로 재현했다. journaled renameat2의 no-replace 보호와 다르다.
+- **STORAGE-015-03 / 중상:** 무저널 자동 rename 성공 뒤 마지막 jobs 저장 실패는 state_error로 보고하지만 디스크에 옛 이름이 남는다. 생성 기록을 reload하고 앱 recovery를 호출해도 저널이 없어 새 경로 연결을 복구하지 못했다. 새 음악/sidecar 및 최초 백업은 남아 정확 복원은 가능하다.
+- **STORAGE-015-04 / 중간:** LRC 자동 rename의 파일/sidecar/LRC 이동 후 jobs 저장이 계속 실패하면 pending·차단 상태가 된다. storage.save는 rename 예외를 잡은 뒤 여전히 옛 path를 describe하여 FileNotFoundError를 내고 실제 새 경로의 partial 결과를 반환하지 못한다. 이후 저널 전진 복구·정확 복원은 정상이다. 기존 #014와 보고 범주는 유사하지만 트리거가 다르다.
+- **STORAGE-015-05 / 높음:** 무저널 음악 이동과 sidecar rollback이 함께 실패하면 음악은 옛 이름/sidecar는 새 이름에 남는다. 오류 문구는 sidecar 위치를 알려주지만 앱 recovery로 연결되지 않으며 원래 경로 restore는 차단된다. 테스트의 생성 sidecar만 명시적으로 되옮긴 뒤 검증/원본 복원이 가능함을 확인했다. 이 수동 fixture 정리는 앱 자동 복구 성공으로 계산하지 않는다. 최초 중앙 원본 자체의 손실은 아니다.
+
+신규 6개 예상 실패의 마지막 assertion은 각각 partial/saved 불일치(2개), 외부 대상 보존 불일치, 옛/새 기록 경로 불일치, 새 경로 응답 부재, sidecar 연결 복구 부재다. 위험한 결과를 정상 계약으로 고정하지 않았고 운영 파일에 실제 손상이 발생했다고 주장하지 않는다.
+
+#### 범위와 다음 단계
+
+기록 reload는 동일 프로세스에서 생성 JSON을 다시 읽는 검증이다. 프로세스 kill/실제 재시작·전원 장애, 호스트 파일시스템의 장애 지속성/ACL·xattr, 실제 SMB 동시 쓰기, 운영 재해 복구는 검증하지 않았다. 이번 통과가 해당 안전성을 보장하지 않는다.
+
+1a 파일 I/O의 **동작 변경 없는 기계적 분리는 진행 가능**하다. 동일 함수/예외·공개 순서·잠금·mock 주입 지점과 현재 suite의 통과/예상 실패 구분을 유지해야 한다. 덮어쓰기와 복구 결함은 분리 작업에 섞어 고치지 말고 별도 안전성 수정 작업을 우선 검토한다.
+
+이번 커밋 대상은 신규 테스트와 계획 문서 두 파일뿐이다. 최종 문서화·커밋 준비 명령이 사용량 한도로 자동 승인 검토를 완료하지 못해 한 차례 실행되지 않았으며, 사용자 계속 지시 후 상태 확인과 기록을 재개했다.
