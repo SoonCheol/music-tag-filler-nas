@@ -146,8 +146,11 @@ class V2Tests(unittest.TestCase):
             if str(target).endswith('.lrc'):raise OSError('simulated LRC publish failure')
             return original_new(target,content)
         with patch.object(storage,'_new_file',side_effect=fail_lrc):
-            with self.assertRaises(storage.StorageError):
-                storage.save(path,self.root,self.backups,{'title':'Committed'},['title'],False,before,lrc=self.timed,asset_root=self.data)
+            outcome=storage.save(path,self.root,self.backups,{'title':'Committed'},['title'],False,before,lrc=self.timed,asset_root=self.data)
+        self.assertEqual(outcome['status'],'partial')
+        self.assertTrue(outcome['music_saved'])
+        self.assertTrue(outcome['recovery_pending'])
+        self.assertIn('simulated LRC publish failure',outcome['warning'])
         self.assertEqual(tags.read_file(str(path)).tags.title,'Committed');self.assertNotEqual(storage.revision(path),before)
         main.recover_filename_changes();rename_service.check_ready(self.data)
         self.assertEqual(path.with_suffix('.lrc').read_text(),self.timed+'\n')

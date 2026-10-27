@@ -308,7 +308,7 @@ class P2Tests(unittest.TestCase):
 
     def test_option_defaults_and_bounds(self):
         value = preferences.Preferences().model_dump()
-        self.assertEqual(value, {"country": "KR", "recurse": True, "only_empty": True,
+        self.assertEqual(value, {"country": "KR", "recurse": True, "use_fingerprint": False, "only_empty": True,
                                  "fill_lyrics": False, "save_synced": False, "create_lrc": False, "rename": False, "include_ids": False,
                                  "artist_name_preference": "original", "cover_max_px": 1000})
         for country in ("KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"):

@@ -85,6 +85,11 @@ def _json_bytes(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _sync_dir(path):
+    from . import rename_service
+    rename_service.sync_dir(path)
+
+
 def _new_file(path, data):
     """Publish a fully written file without replacing an existing first backup."""
     fd, name = tempfile.mkstemp(prefix=".tagbak-", dir=path.parent)
@@ -94,6 +99,7 @@ def _new_file(path, data):
             output.flush()
             os.fsync(output.fileno())
         os.link(name, path)  # fails closed if the destination already exists
+        _sync_dir(path.parent)
     finally:
         Path(name).unlink(missing_ok=True)
 
@@ -108,6 +114,7 @@ def _replace_file(path, data):
         if path.exists():
             os.chmod(name, stat.S_IMODE(path.stat().st_mode))
         os.replace(name, path)
+        _sync_dir(path.parent)
     finally:
         Path(name).unlink(missing_ok=True)
 
@@ -150,10 +157,19 @@ def _verify_backup(path, root, backup_root, allow_missing=False):
         raise StorageError("백업 무결성 검사 실패 또는 기존 백업 형식 불일치: 원본을 변경하지 않았습니다") from exc
 
 
+def _sync_backup(folder, music):
+    _sync_dir(folder)
+    _sync_dir(folder.parent)
+    _sync_dir(folder.parent.parent)
+    _sync_dir(music.parent)
+
+
 def ensure_backup(path, root, backup_root, expected):
     sidecar = Path(tags.backup_path(str(path)))
     if sidecar.exists():
-        return _verify_backup(path, root, backup_root)
+        folder, manifest = _verify_backup(path, root, backup_root)
+        _sync_backup(folder, path)
+        return folder, manifest
     if (Path(backup_root) / (path.name + ".tagbak.json")).exists():
         raise StorageError("이전 형식의 중앙 백업이 있습니다. 최초 원본을 확인할 수 없어 새 백업/저장을 차단했습니다")
     relative = str(path.relative_to(Path(root).resolve()))
@@ -163,6 +179,7 @@ def ensure_backup(path, root, backup_root, expected):
         folder, manifest = _verify_backup(path, root, backup_root, allow_missing=True)
         if manifest["sha256"] != expected:
             raise StorageError("원본 백업은 있으나 sidecar가 없고 파일이 변경되어 안전하게 재개할 수 없습니다")
+        _sync_backup(folder, path)
         _new_file(sidecar, (folder / "tags.json").read_bytes())
         return _verify_backup(path, root, backup_root)
     Path(backup_root).mkdir(parents=True, exist_ok=True)
@@ -188,7 +205,10 @@ def ensure_backup(path, root, backup_root, expected):
         for child in temporary.iterdir():
             with child.open("rb") as stream:
                 os.fsync(stream.fileno())
+        _sync_dir(temporary)
         temporary.rename(destination)
+        _sync_dir(backup_root)
+        _sync_dir(backup_root.parent)
         _new_file(sidecar, tag_bytes)
         return _verify_backup(path, root, backup_root)
     except Exception as exc:
@@ -312,6 +332,7 @@ def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
             committed_revision = revision(stage)
             try:
                 os.replace(stage, path)
+                _sync_dir(path.parent)
             except Exception as exc:
                 # Some filesystem wrappers can raise after publishing the staged file.
                 if stage.exists() or path.is_symlink() or not path.is_file() or revision(path) != committed_revision:

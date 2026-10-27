@@ -1,20 +1,20 @@
 import threading
 from unittest.mock import patch, Mock
 import unittest
-from test_p2_workflow import P2Tests
+import test_p2_workflow as p2
 from app import main, search_service
 from app.upstream import net
 
 class Probe(unittest.TestCase):
-    setUpClass = P2Tests.__dict__["setUpClass"]
-    tearDownClass = P2Tests.__dict__["tearDownClass"]
-    setUp = P2Tests.setUp
-    tearDown = P2Tests.tearDown
-    copy = P2Tests.copy
-    job = P2Tests.job
-    item = P2Tests.item
-    request = P2Tests.request
-    http = P2Tests.http
+    setUpClass = p2.P2Tests.__dict__["setUpClass"]
+    tearDownClass = p2.P2Tests.__dict__["tearDownClass"]
+    setUp = p2.P2Tests.setUp
+    tearDown = p2.P2Tests.tearDown
+    copy = p2.P2Tests.copy
+    job = p2.P2Tests.job
+    item = p2.P2Tests.item
+    request = p2.P2Tests.request
+    http = p2.P2Tests.http
     def test_stop_restart_progress(self):
         paths=[self.copy(str(i)+'.mp3') for i in range(3)]
         before=[(p.read_bytes(),p.stat().st_mtime_ns) for p in paths]
