@@ -21,9 +21,9 @@ const html = pageHtml
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
-  function element() {return {value:'',checked:false,hidden:true,style:{setProperty(k,v){this[k]=v;}},children:[],listeners:{},attributes:{},dataset:{},scrollTop:0,
+  function element() {return {value:'',checked:false,hidden:true,style:{setProperty(k,v){this[k]=v;}},children:[],listeners:{},attributes:{},dataset:{},scrollTop:0,_innerHTML:'',
     showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return this.valid!==false;},
-    innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];if(k==='src')this.src='';},focus(){},
+    get innerHTML(){return this._innerHTML;},set innerHTML(value){this._innerHTML=value;if(value==='')this.children=[];},textContent:'',classList:{add(){},remove(){}},setAttribute(k,v){this.attributes[k]=v;},removeAttribute(k){delete this.attributes[k];if(k==='src')this.src='';},focus(){},
     appendChild(child){child.parent=this;this.children.push(child);},replaceChildren(...children){this.children.forEach(c=>c.parent=null);this.children=[];children.forEach(c=>this.appendChild(c));},
     addEventListener(name,fn){this.listeners[name]=fn;},contains(target){return target===this||this.children.some(c=>c.contains(target));}};}
   function $(id){if(!elements.has(id))elements.set(id,element());return elements.get(id);}
@@ -262,12 +262,12 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const progress=harness();
   progress.context.tasks=[{id:'first',job_id:'one',status:'saving',saved:23,total:49,processed:25,failed:1,skipped:1,partial:0,current_file:'<long>.mp3',current_path:'/music/folder/<long>.mp3'},{id:'second',job_id:'two',status:'done',saved:2,total:2,processed:2,failed:0,skipped:0,partial:0}];
   progress.run('renderSaveTasks(tasks)');
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('[23/49]'));
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('실패 1개'));
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.includes('title="/music/folder/&lt;long&gt;.mp3"'));
-  assert.ok(progress.$('saveJobs').children[0].innerHTML.indexOf('class="progress"')>progress.$('saveJobs').children[0].innerHTML.indexOf('class="save-current-file"'));
-  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('[2/2]'));
-  assert.ok(progress.$('saveJobs').children[1].innerHTML.includes('badge-ok'));
+  assert.ok(progress.$('jobs').children[0].innerHTML.includes('[23/49]'));
+  assert.ok(progress.$('jobs').children[0].innerHTML.includes('실패 1개'));
+  assert.ok(progress.$('jobs').children[0].innerHTML.includes('title="/music/folder/&lt;long&gt;.mp3"'));
+  assert.ok(progress.$('jobs').children[0].innerHTML.indexOf('class="progress"')>progress.$('jobs').children[0].innerHTML.indexOf('class="save-current-file"'));
+  assert.ok(progress.$('jobs').children[1].innerHTML.includes('[2/2]'));
+  assert.ok(progress.$('jobs').children[1].innerHTML.includes('badge-ok'));
 
   for(const [state,bg,fg] of [['auto','#E6F1FF','#175CD3'],['review','#FFF0D6','#A65B00'],['saved','#E4F5E9','#207245']]){
     assert.ok(html.includes('.file-state-'+state+'{background:'+bg+';color:'+fg+'}'));
@@ -467,7 +467,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const batch=harness();batch.context.jobsResponse=[{id:'done',status:'done',results:[]},{id:'stopped',status:'cancelled',results:[]},{id:'busy',status:'scanning',results:[]}];
   await batch.run('pollJobs()');batch.run('selectBackgroundJobs(true)');
   assert.equal(batch.run('selectedBackgroundJobs.size'),2);assert.equal(batch.$('deleteSelectedJobs').textContent,'선택 작업 삭제 (2건)');
-  assert.ok(batch.$('jobs').children[2].innerHTML.includes('disabled'));
+  assert.ok(batch.$('jobs').children[0].innerHTML.includes("cancelSpecific('busy')"));
   const batchFetch=batch.context.fetch;
   batch.context.fetch=async(url,options={})=>{if(url==='/api/jobs/delete'){const ids=JSON.parse(options.body).ids;batch.context.jobsResponse=batch.context.jobsResponse.filter(j=>!ids.includes(j.id));}return batchFetch(url,options);};
   const beforeDelete=batch.calls.filter(c=>c.url==='/api/jobs/delete').length;
@@ -476,6 +476,20 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   const acceptBatch=batch.run('deleteSelectedBackgroundJobs()');batch.run('resolveAction(true)');await acceptBatch;
   const deleted=batch.calls.filter(c=>c.url==='/api/jobs/delete').at(-1);assert.deepEqual(deleted.body.ids,['done','stopped']);
   assert.equal(batch.run('allJobs.length'),1);assert.equal(batch.run('selectedBackgroundJobs.size'),0);
+  const ordering=harness();ordering.context.jobsResponse=[
+    {id:'done-scan',status:'done',created_at:9,record_version:9,results:[]},
+    {id:'paused-scan',status:'interrupted',created_at:8,record_version:8,results:[]},
+    {id:'queued-scan',status:'queued',created_at:1,record_version:1,results:[]},
+    {id:'running-scan',status:'scanning',created_at:2,record_version:2,results:[]}
+  ];
+  ordering.run("renderSaveTasks([{id:'done-save',job_id:'done-scan',status:'done',created_at:10,finished_at:7,saved:1,total:1},{id:'running-save',job_id:'done-scan',status:'saving',created_at:3,saved:0,total:1},{id:'partial-save',job_id:'done-scan',status:'done',partial:1,created_at:4,saved:0,total:1}])");
+  await ordering.run('pollJobs()');
+  const orderedIds=ordering.$('jobs').children.map(row=>row.innerHTML.match(/data-job-select="([^"]+)/)?.[1]);
+  assert.deepEqual(orderedIds,['save:running-save','scan:running-scan','scan:queued-scan','scan:paused-scan','save:partial-save','scan:done-scan','save:done-save']);
+  ordering.run("toggleBackgroundJob('save:done-save',true)");
+  ordering.run("renderSaveTasks(lastSaveTasks.map(task=>task.id==='done-save'?{...task,finished_at:12}:task))");
+  assert.ok(ordering.$('jobs').children[5].innerHTML.includes('save:done-save'));
+  assert.ok(ordering.$('jobs').children[5].innerHTML.includes('checked'));
   batch.run('currentResults=Array(10000);filteredResults=[];editingResult=null;renderFileList()');
   assert.equal(batch.$('fileColumn').style['--number-width'],'56px');
   assert.ok(html.includes('position:fixed;inset:0;margin:auto;box-sizing:border-box'));

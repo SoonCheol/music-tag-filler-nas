@@ -135,6 +135,26 @@ class P1Tests(unittest.TestCase):
             self.assertEqual(lyrics.find("Song (Instrumental)", "Singer", 180).status, lyrics.INSTRUMENTAL)
             call.assert_not_called()
 
+    def test_lrclib_parenthetical_localized_title_alias(self):
+        row = {"id": 10986136, "trackName": "Because of you (너 때문에)", "artistName": "After School",
+               "duration": 241, "plainLyrics": "Synthetic fixture lyric text for validation only"}
+        self.assertEqual(lyrics._title_ok("Because of you (너 때문에)", "너 때문에"), True)
+        self.assertEqual(lyrics._title_ok("Because of you (2011 New Recording)", "너 때문에"), False)
+        with patch.object(lyrics, "_search", side_effect=[[row], []]) as lookup:
+            found = lyrics.find("너 때문에", "After School", 241)
+        self.assertEqual((found.status, found.record_id), (lyrics.FOUND, 10986136))
+        self.assertEqual(lookup.call_args_list[0].args[0], {"track_name": "너 때문에", "artist_name": "After School"})
+        self.assertEqual(lookup.call_args_list[1].args[0], {"q": "AfterSchool 너 때문에"})
+
+    def test_lrclib_api_error_is_distinct_from_empty_results(self):
+        with patch.object(lyrics, "_search", side_effect=[net.NetworkError("HTTP 502")]):
+            failed = lyrics.find("Song", "Singer", 180)
+        with patch.object(lyrics, "_search", side_effect=[[], []]):
+            empty = lyrics.find("Song", "Singer", 180)
+        self.assertEqual(failed.status, lyrics.BUSY)
+        self.assertIn("API 오류 (HTTP 502)", failed.message)
+        self.assertEqual((empty.status, empty.message), (lyrics.NOT_FOUND, ""))
+
     def test_lrclib_overload_retry(self):
         responses = [Mock(status_code=503, headers={}) for _ in range(3)] + [Mock(status_code=200)]
         with patch.object(net, "session") as session, patch.object(net.throttle, "wait"), patch.object(net.throttle, "slow_down") as slow, patch.object(net, "_sleep") as sleep:

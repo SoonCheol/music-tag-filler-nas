@@ -79,6 +79,7 @@ class LyricsResult:
     text: str = ""  # plain lyrics when status == FOUND
     record_id: int | None = None
     synced: str = ""
+    message: str = ""
 
 
 def _nfkc(text: str) -> str:
@@ -203,7 +204,15 @@ def _artist_ok(record_artist: str, artist: str) -> bool:
 
 def _title_ok(record_title: str, title: str) -> bool:
     a, b = match.normalize(record_title), match.normalize(title)
-    return bool(a) and (a == b or _norm_ratio(a, b) >= TITLE_MIN) and version_flags(record_title) == version_flags(title)
+    if not a or version_flags(record_title) != version_flags(title):
+        return False
+    if a == b or _norm_ratio(a, b) >= TITLE_MIN:
+        return True
+    # LRCLIB often stores a Korean title as a parenthetical alias after its
+    # English title. Match a complete, non-nested alias without relaxing the
+    # title threshold for arbitrary substrings.
+    aliases = re.findall(r"[\(\[]([^()\[\]]+)[\)\]]", _nfkc(record_title))
+    return any(match.normalize(alias) == b for alias in aliases)
 
 
 def _duration(record: dict) -> float | None:
@@ -346,8 +355,17 @@ def find(title: str, artist: str, length: float, *, cancel: threading.Event | No
             return LyricsResult(BUSY)
         try:
             found = _search(params, cancel)
-        except (net.NetworkError, net.RateLimited):
-            return LyricsResult(BUSY)
+        except net.RateLimited:
+            return LyricsResult(BUSY, message="LRCLIB 요청이 반복 제한되었습니다 (HTTP 429/503). 잠시 후 다시 시도해 주세요.")
+        except net.NetworkError as exc:
+            detail = str(exc)
+            if detail.startswith("HTTP "):
+                message = f"LRCLIB API 오류 ({detail}). 잠시 후 다시 시도해 주세요."
+            elif detail == "bad json":
+                message = "LRCLIB API 응답을 해석할 수 없습니다. 제공처 상태를 확인해 주세요."
+            else:
+                message = f"LRCLIB 연결 오류 ({detail}). 네트워크 연결을 확인해 주세요."
+            return LyricsResult(BUSY, message=message)
         for r in found:
             if not isinstance(r, dict):
                 continue

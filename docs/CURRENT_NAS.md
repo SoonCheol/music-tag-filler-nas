@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v2.0.0` |
-| 이미지 ID | `sha256:78842065fbc0a744a2d23ffff3db267e955e5e1b38d9db1675598ae88287e555` |
+| 이미지 ID | `sha256:431aee94e84f0441a160c943d613032f90cdf2766b21bed0929b51aedade20fc` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -226,7 +226,24 @@ HTML·CSS만 수정했으며 JavaScript 및 백엔드 저장 로직은 유지했
 운영 데이터 보존 해시 검사에서 SSH 계정의 기존 backups 읽기 권한 거부가 발생했고,
 사용자가 배포 중단을 선택했다. #020 소스 전송·이미지 빌드·서비스 재생성은 실행하지 않았다.
 운영 음악 저장·이름 변경·복원·전체 스캔 및 GitHub push 없음.
-현재 실측 이미지 ID는 `sha256:fec14793b0533bb4bbaf2ca4eb5fdf46c1051e377f369adcf0e6b96753f8d90f`이며
-running/재시작0이다. 기존 배포본을 유지하고 `music-tag-filler-nas:rollback-020-20261027`을 같은 이미지에 연결했다.
+당시 실측 이미지 ID는 `sha256:fec14793b0533bb4bbaf2ca4eb5fdf46c1051e377f369adcf0e6b96753f8d90f`이며
+running/재시작0이었다. 당시 배포본에 `music-tag-filler-nas:rollback-020-20261027`을 연결했다.
 상단 표 및 과거 배포 절의 이미지 ID는 당시 기록이며 이 실측값과 구분한다.
 기존 마운트/설정은 유지했으나 전체 data 전후 해시 비교는 미완료다. 배포 재개에는 새 사용자 요청이 필요하다.
+
+## #021 가사 검색 및 작업 정렬 개선 배포 — 2026-10-27
+
+가사 검색은 LRCLIB의 한글 제목 별칭을 포함한 후보 제목을 제목 필터가 탈락시키는 원인을 수정했다.
+검색 결과 없음과 네트워크/API 오류 메시지를 구분하고, 작업 목록은 진행 중·대기·중단·실패/부분·완료 순으로
+통합 정렬한다. 관련 Linux Python 회귀 123개와 Node UI 검사가 통과했다.
+
+배포 전 실행 이미지 `sha256:448ff5fdd68e78e3b9818544fb8ea6266472b98b42a615a2d4ebae3bf69f5be1`을
+`music-tag-filler-nas:rollback-021-20261027`로 보존했다. 새 실행 이미지 ID는 상단 표와 같다.
+기존 deploy-nas.ps1로 소스 백업 후 Portainer stack 32의 `music-tag-filler` 서비스만 재생성했다.
+포트·마운트·환경 설정을 유지했고 컨테이너 running/재시작0, HTTP 및 폴더 API 확인을 통과했다.
+
+배포 전후 기존 컨테이너 권한으로 `/data` 622개 파일(960,745,425 bytes)을 읽어 이름과 내용의
+집계 SHA-256 `42b7585e6493efa418ce286f7b7c2df4b7a7a37f223c8b9863f51f279ab23893`이 동일함을 확인했다.
+운영 음악 파일 저장·이름 변경·복원·스캔과 GitHub push는 하지 않았다.
+실제 웹 HTML과 작업 목록 JavaScript 바이트가 배포 소스와 일치했다. Windows UI 검사 도구가 브라우저 창을
+재획득하지 못해 시각 화면 확인은 미완료다.

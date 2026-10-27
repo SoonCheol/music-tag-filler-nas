@@ -37,7 +37,7 @@ class LyricsService:
                     original_lyrics.CONFLICT: "검색된 가사가 서로 일치하지 않아 사용할 수 없습니다.",
                     original_lyrics.NEED_TAGS: "가사 검색에 제목과 가수가 필요합니다."}
         entry = {"key": key, "candidate_id": candidate_key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
-                 "lyrics": text, "synced": getattr(found, "synced", "") if text else "", "message": messages.get(found.status, "가사 검색 오류가 발생했습니다.") if status == "error" else "",
+                 "lyrics": text, "synced": getattr(found, "synced", "") if text else "", "message": (getattr(found, "message", "") or messages.get(found.status, "가사 검색 오류가 발생했습니다.")) if status == "error" else "",
                  "expires": time.monotonic() + (self.LYRICS_CACHE_TTL if status == "found" else 1800 if status == "not_found" else 60)}
         with self._lyrics_lock:
             self._lyrics_cache[key] = entry
@@ -105,7 +105,7 @@ class LyricsService:
         if not valid and existing and existing["expires"] > time.monotonic():
             entry = dict(existing)
             entry.update(status="not_found" if found.status in (original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error",
-                         lyrics="", synced="", message="가사를 찾지 못했거나 조회에 실패했습니다.")
+                         lyrics="", synced="", message=getattr(found, "message", "") or "가사를 찾지 못했거나 조회에 실패했습니다.")
             return entry
         with self._lyrics_lock:
             latest = self._lyrics_cache.get(key)

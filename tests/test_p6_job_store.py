@@ -47,6 +47,25 @@ class JobStoreTests(unittest.TestCase):
   self.job([self.copy()]);main.jobs['test']['results'][0].pop('ranking_version',None)
   with patch.object(main,'prepare_result',side_effect=AssertionError('must not rank for summaries')):self.assertEqual(len(main.list_jobs(summary=True)),1)
 
+ def test_job_lists_prioritize_state_then_latest_update(self):
+  rows=[{'id':'done','status':'done','created_at':100,'record_version':100},
+        {'id':'failed','status':'failed','created_at':300,'record_version':300},
+        {'id':'paused','status':'interrupted','created_at':500,'record_version':500},
+        {'id':'queued-old','status':'queued','created_at':10,'record_version':10},
+        {'id':'queued-new','status':'queued','created_at':20,'record_version':20},
+        {'id':'running','status':'scanning','created_at':1,'record_version':1}]
+  with patch.dict(main.jobs,{row['id']:row for row in rows},clear=True):
+   self.assertEqual([row['id'] for row in main.list_jobs(summary=True)],
+                    ['running','queued-new','queued-old','paused','failed','done'])
+  tasks=[{'id':'done','status':'done','created_at':100,'finished_at':100},
+         {'id':'partial','status':'done','partial':1,'created_at':200,'finished_at':200},
+         {'id':'queued-old','status':'queued','created_at':10},
+         {'id':'queued-new','status':'queued','created_at':20},
+         {'id':'saving','status':'saving','created_at':1}]
+  with patch.dict(main.save_tasks,{task['id']:task for task in tasks},clear=True):
+   self.assertEqual([task['id'] for task in main.list_save_tasks()],
+                    ['saving','queued-new','queued-old','partial','done'])
+
  def test_bulk_delete_preserves_music_backups_and_other_records(self):
   path=self.copy();before=path.read_bytes();self.job([path]);main.save_jobs()
   main.jobs['keep']={'id':'keep','status':'done','results':[]};main.save_jobs('keep');keep=(self.data/'jobs/keep.json').read_bytes()

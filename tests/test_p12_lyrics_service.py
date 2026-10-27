@@ -47,6 +47,13 @@ class LyricsServiceTests(unittest.TestCase):
             self.assertIs(self.service.legacy_lookup('Song', 'Singer', 10, context)[0], found)
             self.assertEqual(context['busy_streak'], 0)
 
+    def test_provider_error_message_survives_service_mapping(self):
+        failure = upstream.LyricsResult(upstream.BUSY, message='LRCLIB API 오류 (HTTP 502).')
+        with patch.object(upstream, 'find', return_value=failure):
+            entry = self.service.lookup_lyrics('job', 'a.mp3', 'rev', 'Song', 'Singer', 180, force=True)
+        self.assertEqual(entry['status'], 'error')
+        self.assertEqual(entry['message'], 'LRCLIB API 오류 (HTTP 502).')
+
     def test_instance_isolation_and_root_binding(self):
         key = (str(self.root.resolve()), 'job', 'a.mp3', 'rev', 'Song', 'Singer')
         entry = self.service.remember_lyrics(key, upstream.LyricsResult(upstream.FOUND, 'Verified lyric'))

@@ -250,7 +250,10 @@ def public_job(job):
 @app.get("/api/jobs")
 @job_locked
 def list_jobs(summary: bool = False):
-    ordered = sorted(jobs.values(), key=lambda x: x.get("created_at",0), reverse=True)
+    priority = {"scanning": 0, "cancelling": 0, "queued": 1, "interrupted": 2,
+                "cancelled": 2, "failed": 3, "partial": 3, "done": 4}
+    ordered = sorted(jobs.values(), key=lambda x: (priority.get(x.get("status"), 3),
+                                                    -x.get("record_version", x.get("created_at", 0))),)
     if summary:
         return [{k:v for k,v in job.items() if k not in ("results", "options")} for job in ordered]
     for job in ordered:
@@ -660,8 +663,12 @@ def update_save_task(task_id, **values):
 @app.get("/api/save-tasks")
 def list_save_tasks():
     with save_tasks_lock:
-        return sorted([dict(task) for task in save_tasks.values()],
-                      key=lambda task: task["created_at"], reverse=True)
+        tasks = [dict(task) for task in save_tasks.values()]
+    def order(task):
+        state = task.get("status")
+        group = 0 if state == "saving" else 1 if state == "queued" else 3 if state == "failed" or task.get("failed") or task.get("partial") else 4
+        return group, -task.get("finished_at", task.get("created_at", 0))
+    return sorted(tasks, key=order)
 
 
 @app.delete("/api/save-tasks/{task_id}")

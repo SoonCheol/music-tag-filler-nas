@@ -141,14 +141,40 @@ async function startScan(force=false){
 async function resumeScan(){if(!currentJobId)return;stopMediaPrefetch();mediaJobStatus="scanning";const id=currentJobId,previous=allJobs.find(j=>j.id===id),base=previous?scanElapsed(previous):0,start=performance.now();await api('/api/jobs/'+id+'/resume',{method:'POST'});scanBrowserTimes.set(id,{start,base});pollJobs();}
 
 function renderSaveTasks(tasks){
-  lastSaveTasks=tasks;updateBackgroundSelection();
-  const box=$('saveJobs');box.innerHTML='';
-  tasks.forEach(task=>{
-    const active=['queued','saving'].includes(task.status),pct=task.total?Math.round(task.processed/task.total*100):0;
-    const label=task.status==='done'?'저장 완료':task.status==='failed'?'저장 중단':task.status==='queued'?'저장 대기':'저장 중';
-    const counts=[task.failed?`실패 ${task.failed}개`:'',task.skipped?`건너뜀 ${task.skipped}개`:'',task.partial?`일부 처리 ${task.partial}개`:''].filter(Boolean).join(' · ');
+  lastSaveTasks=tasks;updateBackgroundSelection();renderBackgroundJobs();
+}
+
+function backgroundJobGroup(kind,job){
+  if(kind==='save')return job.status==='saving'?0:job.status==='queued'?1:job.status==='failed'||job.failed||job.partial?3:4;
+  return job.status==='scanning'||job.status==='cancelling'?0:job.status==='queued'?1:job.status==='interrupted'||job.status==='cancelled'?2:job.status==='done'?4:3;
+}
+
+function backgroundJobTime(kind,job){
+  return Number(kind==='save'?(job.finished_at||job.created_at):(job.record_version||job.created_at))||0;
+}
+
+function renderBackgroundJobs(){
+  updateBackgroundSelection();
+  const entries=[...allJobs.map(job=>({kind:'scan',job})),...lastSaveTasks.map(job=>({kind:'save',job}))];
+  entries.sort((a,b)=>backgroundJobGroup(a.kind,a.job)-backgroundJobGroup(b.kind,b.job)||backgroundJobTime(b.kind,b.job)-backgroundJobTime(a.kind,a.job)||String(a.job.id).localeCompare(String(b.job.id)));
+  const box=$('jobs');box.innerHTML='';
+  if(!entries.length){box.innerHTML='<div style="text-align:center;color:#999;padding:8px">작업 없음</div>';return;}
+  entries.forEach(({kind,job})=>{
     const row=document.createElement('div');row.className='job';
-    row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title"><input type="checkbox" data-job-select="save:${esc(task.id)}" ${active?'disabled':''} ${selectedBackgroundJobs.has('save:'+task.id)?'checked':''} aria-label="저장 작업 선택" onchange="toggleBackgroundJob('save:${task.id}',this.checked)"> [${task.saved}/${task.total}] ${esc(task.sub_path||'전체')}</span><span class="badge ${task.status==='done'&&!task.failed?'badge-ok':task.failed||task.status==='failed'?'badge-warn':''}">${label}</span></div><div class="save-current-file" title="${esc(task.current_path||'')}">${esc(task.current_file||task.error||'')}</div><div>${esc(counts)}</div><div class="progress" style="margin-top:4px" title="처리 ${task.processed} / ${task.total}개 파일"><div style="width:${pct}%"></div></div>${active?'':`<div style="display:flex;gap:4px;margin-top:4px"><button class="btn" onclick="loadJob('${task.job_id}')">보기</button><button class="btn btn-red" onclick="deleteSaveTask('${task.id}')">삭제</button></div>`}`;
+    if(kind==='save'){
+      const task=job,active=['queued','saving'].includes(task.status),pct=task.total?Math.round(task.processed/task.total*100):0;
+      const label=task.status==='done'?'저장 완료':task.status==='failed'?'저장 중단':task.status==='queued'?'저장 대기':'저장 중';
+      const counts=[task.failed?`실패 ${task.failed}개`:'',task.skipped?`건너뜀 ${task.skipped}개`:'',task.partial?`일부 처리 ${task.partial}개`:''].filter(Boolean).join(' · ');
+      row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title"><input type="checkbox" data-job-select="save:${esc(task.id)}" ${active?'disabled':''} ${selectedBackgroundJobs.has('save:'+task.id)?'checked':''} aria-label="저장 작업 선택" onchange="toggleBackgroundJob('save:${task.id}',this.checked)"> [${task.saved}/${task.total}] ${esc(task.sub_path||'전체')}</span><span class="badge ${task.status==='done'&&!task.failed&&!task.partial?'badge-ok':task.failed||task.partial||task.status==='failed'?'badge-warn':''}">${label}</span></div><div class="save-current-file" title="${esc(task.current_path||'')}">${esc(task.current_file||task.error||'')}</div><div>${esc(counts)}</div><div class="progress" style="margin-top:4px" title="처리 ${task.processed} / ${task.total}개 파일"><div style="width:${pct}%"></div></div>${active?'':`<div style="display:flex;gap:4px;margin-top:4px"><button class="btn" onclick="loadJob('${task.job_id}')">보기</button><button class="btn btn-red" onclick="deleteSaveTask('${task.id}')">삭제</button></div>`}`;
+    }else{
+      const j=job,pct=j.total?Math.round(j.scanned/j.total*100):0;let btns='';
+      if(j.status==='scanning'||j.status==='queued'||j.status==='cancelling')btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="cancelSpecific('${j.id}')">중지</button>`;
+      else if(j.status==='interrupted')btns+=`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button><button class="btn btn-red" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="cancelSpecific('${j.id}')">중지</button>`;
+      else if(j.status==='cancelled')btns+=`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button>`;
+      if(!['scanning','queued','cancelling'].includes(j.status))btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteSpecific('${j.id}')">삭제</button>`;
+      btns+=`<button class="btn" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="loadJob('${j.id}')">보기</button>`;
+      row.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title"><input type="checkbox" data-job-select="scan:${esc(j.id)}" ${scanJobBusy(j)?'disabled':''} ${selectedBackgroundJobs.has('scan:'+j.id)?'checked':''} aria-label="스캔 작업 선택" onchange="toggleBackgroundJob('scan:${j.id}',this.checked)"> [${j.scanned||0}/${j.total||0}] ${esc(j.sub_path||'전체')}</span><span class="badge ${j.status==='done'?'badge-ok':j.status==='cancelled'||j.status==='interrupted'||j.status==='failed'?'badge-warn':''}">${esc(j.status)}</span></div><div class="job-current-file" title="${esc(j.current_file||'')}">${esc(j.status==='done'?scanCompletionText(j):(j.current_file||'').split('/').pop())}</div><div class="progress" style="margin-top:4px"><div style="width:${pct}%"></div></div><div style="margin-top:4px;display:flex;gap:4px">${btns}</div>`;
+    }
     box.appendChild(row);
   });
 }
@@ -184,28 +210,7 @@ async function pollJobs(){
   try{
     if(!renameBusy)await pollPathChanges();
     const jobs=await api('/api/jobs?summary=true'); allJobs=jobs;updateBackgroundSelection();if(currentJobId!==initialSelection&&displayedJobId)return;
-    const box=$('jobs');
-    if(!jobs.length){box.innerHTML='<div style="text-align:center;color:#999;padding:8px">작업 없음</div>'}else{
-      box.innerHTML='';
-      jobs.forEach(j=>{
-        const pct=j.total?Math.round(j.scanned/j.total*100):0;
-        const d=document.createElement('div'); d.className='job';
-        // 중지 버튼 추가: scanning, queued, interrupted 모두에 중지/삭제 제공
-        let btns='';
-        if(j.status==='scanning'||j.status==='queued'||j.status==='cancelling'){
-          btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="cancelSpecific('${j.id}')">중지</button>`;
-        }else if(j.status==='interrupted'){
-          btns+=`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button>`;
-          btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="cancelSpecific('${j.id}')">중지</button>`;
-        }else if(j.status==='cancelled'){
-          btns+=`<button class="btn btn-green" style="padding:2px 6px;font-size:11px" onclick="resumeSpecific('${j.id}')">이어하기</button>`;
-        }
-        if(!['scanning','queued','cancelling'].includes(j.status))btns+=`<button class="btn btn-red" style="padding:2px 6px;font-size:11px" onclick="deleteSpecific('${j.id}')">삭제</button>`;
-        btns+=`<button class="btn" style="padding:2px 6px;font-size:11px;margin-left:4px" onclick="loadJob('${j.id}')">보기</button>`;
-        d.innerHTML=`<div style="display:flex;justify-content:space-between;font-weight:700"><span class="job-title"><input type="checkbox" data-job-select="scan:${esc(j.id)}" ${scanJobBusy(j)?'disabled':''} ${selectedBackgroundJobs.has('scan:'+j.id)?'checked':''} aria-label="스캔 작업 선택" onchange="toggleBackgroundJob('scan:${j.id}',this.checked)"> [${j.scanned||0}/${j.total||0}] ${esc(j.sub_path||'전체')}</span><span class="badge ${j.status==='done'?'badge-ok':j.status==='cancelled'||j.status==='interrupted'?'badge-warn':''}">${j.status}</span></div><div class="job-current-file" title="${esc(j.current_file||'')}">${esc(j.status==='done'?scanCompletionText(j):(j.current_file||'').split('/').pop())}</div><div class="progress" style="margin-top:4px"><div style="width:${pct}%"></div></div><div style="margin-top:4px;display:flex;gap:4px">${btns}</div>`;
-        box.appendChild(d);
-      });
-    }
+    renderBackgroundJobs();
     let active=jobs.find(j=>j.id===currentJobId&&(!viewPinned||(j.sub_path||'')===$('subPath').value))||(viewPinned?jobs.find(j=>(j.sub_path||'')===$('subPath').value):jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0]);
     if(active&&!active.results&&!saving&&!searching&&!renameEditor&&!renameBusy&&!actionResolver&&(displayedJobId!==active.id||lastDetailRevision!==jobViewKey(active))){const key=jobViewKey(active),expectedSelection=currentJobId;active=await api('/api/jobs/'+encodeURIComponent(active.id));if(currentJobId!==expectedSelection)return;lastDetailRevision=key;}
     if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=active.status==='done'?scanCompletionText(active):`전체 ${active.total||0}곡 / 검색 완료 ${active.scanned||0}곡 / 남은 ${Math.max(0,(active.total||0)-(active.scanned||0))}곡 (${active.status})`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnResume').style.display='inline-block';}else{ $('btnResume').style.display='none';}if(!saving&&!searching&&!renameEditor&&!renameBusy&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}observeScanCompletion(active);mediaJobStatus=active.status;scheduleMediaPrefetch();}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
