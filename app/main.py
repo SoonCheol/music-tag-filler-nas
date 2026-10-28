@@ -381,18 +381,17 @@ def search_file_lyrics(job_id: str, request: LyricsSearchRequest):
                 raise HTTPException(409, "파일이 변경되었습니다. 다시 확인하세요")
         except (storage.StorageError, OSError) as exc:
             raise HTTPException(400, str(exc))
-        duration = row.get("original", {}).get("duration", 0)
     candidate = None
     if request.candidate_id:
         candidate = next((c for c in row.get("candidates", []) if candidate_id(c) == request.candidate_id), None)
         if candidate is None:
             raise HTTPException(404, "이 파일의 후보가 아닙니다")
     return lyric_response(lookup_lyrics(job_id, request.path, request.expected_revision,
-                                      request.title, request.artist, duration, candidate, request.force))
+                                      request.title, request.artist, 0, candidate, request.force, manual=True))
 
 
-def lookup_lyrics(job_id, path, revision, title, artist, duration, candidate=None, force=False):
-    return _lyrics_service.lookup_lyrics(job_id, path, revision, title, artist, duration, candidate, force)
+def lookup_lyrics(job_id, path, revision, title, artist, duration, candidate=None, force=False, *, manual=False):
+    return _lyrics_service.lookup_lyrics(job_id, path, revision, title, artist, duration, candidate, force, manual=manual)
 
 
 def selected_lyrics(job_id, path, revision, lyrics_id, title, artist):

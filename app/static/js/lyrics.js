@@ -30,7 +30,7 @@ function startCandidateLyrics(entry){
 function applyLyricResult(r,value,queryKey,candidateId){
   if(value.status!=='found'||!value.lyrics?.trim()||r._lyricsEdited||protectedAsset(r,'lyrics'))return false;
   if(value.query_title!==undefined&&JSON.stringify([value.query_title,value.query_artist])!==queryKey)return false;
-  r._lyricsSearch={...value,queryKey,candidateId};r._lyricsLookupStatus=null;
+  r._lyricsSearch={...value,queryKey,candidateId};r._lyricsLookupStatus=null;r._manualLyricsStatus=null;
   if(editingResult===r)updateSavePreview();return true;
 }
 
@@ -62,6 +62,28 @@ function effectiveLyricTags(r){
   return final;
 }
 
+function manualLyricTags(r){
+  return r===editingResult?{title:$('chg_title').value,artist:$('chg_artist').value}:{title:r._draft?.title??r.original?.title??'',artist:r._draft?.artist??r.original?.artist??''};
+}
+
+function manualLyricQueryKey(r){if(!r)return '';const tags=manualLyricTags(r);return JSON.stringify([tags.title,tags.artist]);}
+
+function selectManualLyrics(index){
+  const r=editingResult,state=r?._lyricsSearch,choice=state?.choices?.[Number(index)];
+  if(!choice||saving||!state.manual||state.queryKey!==manualLyricQueryKey(r))return;
+  r._lyricsEdited=false;r._lyricsEpoch=(r._lyricsEpoch||0)+1;
+  r._lyricsSearch={...state,...choice,selectedIndex:Number(index)};updateSavePreview();
+}
+
+function renderManualLyrics(r){
+  const state=r?._lyricsSearch,box=$('manualLyricsChoices'),choices=state?.manual?state.choices:[];
+  box.hidden=!choices||choices.length<2;
+  box.disabled=saving||!!r?._lyricsRequest?.active||state?.queryKey!==manualLyricQueryKey(r);
+  box.innerHTML=(choices||[]).map((c,i)=>`<option value="${i}">${esc(c.title)} — ${esc(c.artist)}${c.album?' · '+esc(c.album):''} · ${c.synced?'시간 가사':'일반 가사'} #${esc(c.record_id??i+1)}</option>`).join('');
+  box.value=String(state?.selectedIndex||0);
+  const status=$('manualLyricsStatus');status.textContent=r?._manualLyricsStatus||'';status.hidden=!status.textContent;
+}
+
 function lyricQueryKey(r){const final=effectiveLyricTags(r);return JSON.stringify([final.title,final.artist]);}
 
 function lyricChoice(r){const state=r._lyricsSearch;return commonSaveLyrics&&!protectedAsset(r,'lyrics')&&state&&state.status!=='searching'&&state.lyrics_id&&state.queryKey===lyricQueryKey(r)&&(!state.candidateId||state.candidateId===r._candidateId)?state:null;}
@@ -80,7 +102,7 @@ function paintLyrics(id,text,empty=false,preview=false){
 }
 
 function renderLyricsPanels(r,active=false,plan=null){
-  $('changeLyrics').title='';
+  renderManualLyrics(r);$('changeLyrics').title='';
   $('changeLyrics').readOnly=!r||protectedAsset(r,'lyrics')||!r._lyricsSearch?.lyrics_id;
   if(!r){paintLyrics('currentLyrics','가사 없음',true);paintLyrics('changeLyrics','검색 안 함',true);$('btnSearchLyrics').disabled=true;return;}
   loadStoredLyrics(r);const current=storedLyrics(r),state=r._lyricsSearch;
@@ -91,7 +113,7 @@ function renderLyricsPanels(r,active=false,plan=null){
   else paintLyrics('currentLyrics',current?.lyrics||'가사 없음',!current?.lyrics);
   if(!state)paintLyrics('changeLyrics','검색 안 함',true);
   else if(state.status==='searching')paintLyrics('changeLyrics','검색 중...',true);
-  else if(state.queryKey!==lyricQueryKey(r)||(!r._lyricsEdited&&state.candidateId&&state.candidateId!==r._candidateId)){
+  else if(state.queryKey!==(state.manual?manualLyricQueryKey(r):lyricQueryKey(r))||(!r._lyricsEdited&&state.candidateId&&state.candidateId!==r._candidateId)){
     paintLyrics('changeLyrics',state.lyrics||'태그가 변경되었습니다. 다시 검색해 주세요.',!state.lyrics);
     $('changeLyrics').title='현재 선택한 곡과 검색 조건이 달라 저장에서 제외됩니다. 가사를 다시 검색해 주세요.';
   }
@@ -103,20 +125,27 @@ function renderLyricsPanels(r,active=false,plan=null){
 }
 
 async function searchLyricsForCurrent(){
-  if(!editingResult||saving)return;captureCurrent();const r=editingResult,jobId=currentJobId;
-  if(r._lyricsRequest?.active)return;
-  const tags=effectiveLyricTags(r),queryKey=lyricQueryKey(r),candidateId=r._candidateId,epoch=r._lyricsEpoch=(r._lyricsEpoch||0)+1;
-  const previous=r._lyricsSearch,request={active:true},placeholder={status:'searching',queryKey};r._lyricsRequest=request;
+  if(!editingResult||saving)return;const r=editingResult,jobId=currentJobId,tags=manualLyricTags(r);
+  if(r._lyricsRequest?.active)return;captureCurrent();
+  const queryKey=JSON.stringify([tags.title,tags.artist]),candidateId=r._candidateId,epoch=r._lyricsEpoch=(r._lyricsEpoch||0)+1;
+  const previous=r._lyricsSearch,request={active:true},placeholder={status:'searching',queryKey,manual:true};r._lyricsRequest=request;r._manualLyricsStatus='검색 중...';
   if(!previous)r._lyricsSearch=placeholder;updateSavePreview();
   try{
     const value=await api('/api/jobs/'+encodeURIComponent(jobId)+'/lyrics-search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:r.path,expected_revision:r._draftRevision,title:tags.title,artist:tags.artist,force:true,candidate_id:candidateId||null})});
-    if(currentJobId===jobId&&editingResult===r&&r._lyricsEpoch===epoch&&queryKey===lyricQueryKey(r)&&candidateId===r._candidateId&&!r._lyricsEdited){
-      if(!applyLyricResult(r,value,queryKey,candidateId))r._lyricsSearch=previous||{...value,queryKey,candidateId};
+    if(currentJobId===jobId&&editingResult===r&&r._lyricsEpoch===epoch&&queryKey===manualLyricQueryKey(r)&&candidateId===r._candidateId&&!r._lyricsEdited){
+      if(value.status==='found'&&value.lyrics?.trim()){
+        r._lyricsSearch={...value,queryKey,candidateId,manual:true,selectedIndex:0};
+        r._manualLyricsStatus=value.choices?.length>1?`${value.choices.length}개 가사 후보 중 선택하세요.`:'가사 검색 완료';
+      }else{
+        r._lyricsSearch=previous||{...value,queryKey,candidateId,manual:true};
+        r._manualLyricsStatus=value.status==='not_found'?'검색 결과 없음':value.message||'가사 검색 오류가 발생했습니다. 다시 시도해 주세요.';
+      }
     }
-  }catch(error){if(!previous&&r._lyricsEpoch===epoch)r._lyricsSearch={status:'error',queryKey,message:'가사 검색 오류: '+error.message};}
+  }catch(error){if(r._lyricsEpoch===epoch){r._manualLyricsStatus='가사 검색 오류: '+error.message;if(!previous)r._lyricsSearch={status:'error',queryKey,manual:true,message:r._manualLyricsStatus};}}
   finally{
     if(placeholder.status==='searching')Object.assign(placeholder,{status:'error',message:'다시 검색해 주세요.'});
     if(r._lyricsSearch===placeholder)r._lyricsSearch=previous||null;
+    if(r._manualLyricsStatus==='검색 중...')r._manualLyricsStatus='검색 조건이 변경되었습니다. 다시 검색해 주세요.';
     request.active=false;if(r._lyricsRequest===request)r._lyricsRequest=null;
     if(currentJobId===jobId&&editingResult===r)updateSavePreview();
   }

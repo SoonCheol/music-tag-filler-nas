@@ -157,6 +157,33 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   lyricUI.context.fetch=async()=>{throw new Error('offline');};await lyricUI.run('searchLyricsForCurrent()');assert.equal(lyricUI.$('changeLyrics').value,'Found line one\nFound line two');assert.notEqual(lyricUI.$('changeLyrics').textContent,'검색 결과 없음');
   assert.ok(html.includes('.file-lyrics+.file-name-text{margin-left:6px}'));assert.ok(html.includes('height:210px'));assert.ok(!html.includes('<textarea id="currentLyrics"'));
 
+  const manualUI=harness();
+  manualUI.context.manualJob={id:'manual-current',results:[{path:'generated.mp3',original:{title:'',artist:'',revision:'a'.repeat(64)},candidates:[]}]};
+  manualUI.run('adoptJob(manualJob)');
+  for(const onlyEmpty of [false,true])for(const checked of [false,true]){
+    manualUI.$('onlyEmpty').checked=onlyEmpty;
+    manualUI.run(`commonTagFields=${checked?"['title','artist']":"[]"};updateSavePreview()`);
+    manualUI.$('chg_title').value='너 때문에';manualUI.$('chg_title').listeners.input();
+    manualUI.$('chg_artist').value='After School';manualUI.$('chg_artist').listeners.input();
+    manualUI.context.lyricResponse={status:'found',lyrics:'Fixture candidate one lyric text',lyrics_id:'manual-one',query_title:'너 때문에',query_artist:'After School',choices:[
+      {status:'found',lyrics:'Fixture candidate one lyric text',lyrics_id:'manual-one',title:'너 때문에',artist:'After School',album:'One',record_id:1},
+      {status:'found',lyrics:'Fixture candidate two lyric text',lyrics_id:'manual-two',title:'너 때문에',artist:'After School',album:'Two',record_id:2}]};
+    await manualUI.run('searchLyricsForCurrent()');
+    const body=manualUI.calls.filter(c=>c.url.endsWith('/lyrics-search')).at(-1).body;
+    assert.equal(body.title,'너 때문에');assert.equal(body.artist,'After School');assert.equal(body.force,true);
+    assert.equal(manualUI.$('changeLyrics').value,'Fixture candidate one lyric text');assert.equal(manualUI.$('manualLyricsChoices').hidden,false);
+    manualUI.run('selectManualLyrics(1)');assert.equal(manualUI.$('changeLyrics').value,'Fixture candidate two lyric text');
+    assert.equal(manualUI.run('lyricChoice(editingResult)?.lyrics_id||null'),checked?'manual-two':null);
+  }
+  assert.equal(manualUI.calls.filter(c=>c.url.endsWith('/save')).length,0);
+  manualUI.context.lyricResponse={status:'not_found',message:''};await manualUI.run('searchLyricsForCurrent()');
+  assert.equal(manualUI.$('manualLyricsStatus').textContent,'검색 결과 없음');
+  manualUI.context.lyricResponse={status:'error',message:'LRCLIB API 오류 (HTTP 502)'};await manualUI.run('searchLyricsForCurrent()');
+  assert.equal(manualUI.$('manualLyricsStatus').textContent,'LRCLIB API 오류 (HTTP 502)');
+  manualUI.$('chg_title').value='New unsaved title';manualUI.$('chg_title').listeners.input();
+  manualUI.run('selectManualLyrics(0)');assert.equal(manualUI.$('changeLyrics').value,'Fixture candidate two lyric text');
+  manualUI.run("applyPathChange({seq:1,old_path:'generated.mp3',new_path:'renamed.mp3',revision:'a'.repeat(64),lyrics_tokens:[{old_id:'manual-one',new_id:'renamed-one'},{old_id:'manual-two',new_id:'renamed-two'}]})");
+  assert.equal(manualUI.run('editingResult._lyricsSearch.choices[1].lyrics_id'),'renamed-two');
   const media=harness(),requests=[],pending=[];
   media.context.URL={createObjectURL:()=> 'blob:test-'+requests.length,revokeObjectURL(){}};
   media.context.fetch=(url,options={})=>{requests.push({url,options});return new Promise(resolve=>pending.push(resolve));};

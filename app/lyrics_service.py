@@ -15,7 +15,7 @@ from .upstream import search_lyrics as original_lyrics
 
 
 def lyric_response(entry):
-    return {**{key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "synced", "message")}, "query_title": entry["key"][4], "query_artist": entry["key"][5]}
+    return {**({"choices": entry["choices"]} if entry.get("choices") else {}), **{key: entry[key] for key in ("lyrics_id", "status", "searched", "lyrics", "synced", "message")}, "query_title": entry["key"][4], "query_artist": entry["key"][5]}
 
 
 class LyricsService:
@@ -30,13 +30,25 @@ class LyricsService:
         self.LYRICS_CACHE_LIMIT = 2000
         self.LYRICS_CACHE_TTL = 86400
 
-    def remember_lyrics(self, key, found, searched=True, candidate_key=None):
+    def remember_lyrics(self, key, found, searched=True, candidate_key=None, manual=False):
+        if manual and found.choices:
+            with self._lyrics_lock:
+                choices = []
+                first = None
+                for choice in found.choices:
+                    result = original_lyrics.LyricsResult(original_lyrics.FOUND, choice["text"], choice["record_id"], choice["synced"])
+                    entry = self.remember_lyrics(key, result, searched, candidate_key, manual=True)
+                    first = first or entry
+                    choices.append({**lyric_response(entry), **{k: choice[k] for k in ("record_id", "title", "artist", "album")}})
+                first["choices"] = choices
+                self._lyrics_cache[key] = first
+                return first
         text = original_lyrics.clean_text(found.text) if found.status == original_lyrics.FOUND else ""
         status = "found" if text else "not_found" if found.status in (original_lyrics.FOUND, original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else "error"
         messages = {original_lyrics.BUSY: "가사 서버에 연결할 수 없습니다. 다시 시도해 주세요.",
                     original_lyrics.CONFLICT: "검색된 가사가 서로 일치하지 않아 사용할 수 없습니다.",
                     original_lyrics.NEED_TAGS: "가사 검색에 제목과 가수가 필요합니다."}
-        entry = {"key": key, "candidate_id": candidate_key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
+        entry = {"key": key, "manual": manual, "candidate_id": candidate_key, "lyrics_id": uuid.uuid4().hex, "status": status, "searched": searched,
                  "lyrics": text, "synced": getattr(found, "synced", "") if text else "", "message": (getattr(found, "message", "") or messages.get(found.status, "가사 검색 오류가 발생했습니다.")) if status == "error" else "",
                  "expires": time.monotonic() + (self.LYRICS_CACHE_TTL if status == "found" else 1800 if status == "not_found" else 60)}
         with self._lyrics_lock:
@@ -52,7 +64,7 @@ class LyricsService:
         return entry
 
 
-    def lookup_lyrics(self, job_id, path, revision, title, artist, duration, candidate=None, force=False):
+    def lookup_lyrics(self, job_id, path, revision, title, artist, duration, candidate=None, force=False, *, manual=False):
         """Shared content lookup; save tokens stay bound to file, revision and candidate.
 
         The network runs outside OPERATION_LOCK. Exact query/version/length keys avoid
@@ -61,9 +73,11 @@ class LyricsService:
         key = (str(self.music_root().resolve()), job_id, path, revision, title, artist)
         candidate_key = self.candidate_id(candidate) if candidate else None
         edition = tuple(str((candidate or {}).get(k) or "") for k in ("title", "artist", "album", "duration"))
-        content_key = (title, artist, float(duration or 0), edition)
+        content_key = (title, artist, None if manual else float(duration or 0), () if manual else edition, manual)
         with self._lyrics_lock:
             existing = self._lyrics_cache.get(key)
+            if existing and existing.get("manual", False) != manual:
+                existing = None
             if not force and existing and existing["expires"] > time.monotonic() and existing.get("candidate_id") == candidate_key:
                 self._lyrics_cache.move_to_end(key)
                 self._lyrics_tokens.move_to_end(existing["lyrics_id"])
@@ -87,7 +101,7 @@ class LyricsService:
         if future is not None:
             if owner:
                 try:
-                    found = original_lyrics.find(title, artist, duration) if title.strip() and artist.strip() else original_lyrics.LyricsResult(original_lyrics.NEED_TAGS)
+                    found = original_lyrics.find(title, artist, 0 if manual else duration, **({"manual": True} if manual else {})) if title.strip() and artist.strip() else original_lyrics.LyricsResult(original_lyrics.NEED_TAGS)
                 except Exception:
                     found = original_lyrics.LyricsResult(original_lyrics.BUSY)
                 ttl = self.LYRICS_CACHE_TTL if found.status == original_lyrics.FOUND else 1800 if found.status in (original_lyrics.NOT_FOUND, original_lyrics.NO_LYRICS, original_lyrics.INSTRUMENTAL) else 60
@@ -109,9 +123,9 @@ class LyricsService:
             return entry
         with self._lyrics_lock:
             latest = self._lyrics_cache.get(key)
-            if latest and latest is not existing and latest["expires"] > time.monotonic() and latest.get("candidate_id") == candidate_key:
+            if latest and latest is not existing and latest["expires"] > time.monotonic() and latest.get("candidate_id") == candidate_key and latest.get("manual", False) == manual:
                 return latest
-            return self.remember_lyrics(key, found, bool(title.strip() and artist.strip()), candidate_key)
+            return self.remember_lyrics(key, found, bool(title.strip() and artist.strip()), candidate_key, manual=manual)
 
 
     def selected_lyrics(self, job_id, path, revision, lyrics_id, title, artist):
@@ -139,6 +153,10 @@ class LyricsService:
                     self._lyrics_cache[new_key] = entry
                     self._lyrics_tokens[entry["lyrics_id"]] = entry
                     remaps.append({"job_id": key[1], "old_id": token, "new_id": entry["lyrics_id"]})
+            token_map = {item["old_id"]: item["new_id"] for item in remaps}
+            for entry in self._lyrics_tokens.values():
+                if entry.get("choices"):
+                    entry["choices"] = [{**choice, "lyrics_id": token_map.get(choice["lyrics_id"], choice["lyrics_id"])} for choice in entry["choices"]]
         return remaps
 
 

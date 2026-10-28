@@ -51,7 +51,7 @@ function captureCurrent(){
 
 function resetDraft(r){
   manualCoverDraft(r,null);
-  r._draft=null;r._dirty=false;r._manualFields=[];r._candidateId=null;r._coverId=null;r._lyricsSearch=null;r._lyricsEdited=false;r._lyricsEpoch=(r._lyricsEpoch||0)+1;r._candidateFeedback=null;r._appliedFields=[];
+  r._draft=null;r._dirty=false;r._manualFields=[];r._candidateId=null;r._coverId=null;r._lyricsSearch=null;r._lyricsEdited=false;r._lyricsEpoch=(r._lyricsEpoch||0)+1;r._candidateFeedback=null;r._appliedFields=[];r._manualLyricsStatus=null;
   ensureDraft(r);previewPath=null;previewRevision=null;
   if(editingResult===r)tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
 }
@@ -72,6 +72,7 @@ function applyPathChange(change){
   groups.forEach(rows=>rows.forEach(r=>{
     if(r.path!==old||r.original?.revision!==change.revision)return;
     r.path=next;if(visible&&currentResults.includes(r))r._renameVisible=true;
+    if(r._lyricsSearch?.choices)r._lyricsSearch.choices=r._lyricsSearch.choices.map(c=>({...c,lyrics_id:(change.lyrics_tokens||[]).find(t=>t.old_id===c.lyrics_id)?.new_id||c.lyrics_id}));
     const token=r._lyricsSearch?.lyrics_id,remap=(change.lyrics_tokens||[]).find(t=>t.old_id===token);
     if(remap)r._lyricsSearch.lyrics_id=remap.new_id;
     else if(token)r._lyricsSearch.lyrics_id=null;

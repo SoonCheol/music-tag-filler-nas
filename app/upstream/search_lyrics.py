@@ -80,6 +80,7 @@ class LyricsResult:
     record_id: int | None = None
     synced: str = ""
     message: str = ""
+    choices: list[dict] = dataclasses.field(default_factory=list)
 
 
 def _nfkc(text: str) -> str:
@@ -285,19 +286,22 @@ def agreeing_camp(records: list[dict]) -> list[dict] | None:
     return [records[i] for src in best for i in sources[src]]
 
 
-def pick(records: list, title: str, artist: str, length: float) -> tuple[str, dict | None]:
+def pick(records: list, title: str, artist: str, length: float, *, manual: bool = False) -> tuple[str, dict | None]:
     """(status, record) for the search results under the rules above."""
     same_song = [r for r in records[:MAX_RECORDS] if isinstance(r, dict)
                  and _title_ok(_str(r.get("trackName")), title)
                  and _artist_ok(_str(r.get("artistName")), artist)
-                 and _length_ok(r, length)]
+                 and (manual or _length_ok(r, length))]
     if not same_song:
         return NOT_FOUND, None
-    with_text = [r for r in same_song if not r.get("instrumental") and record_text(r) and _end_ok(r, length)]
+    with_text = [r for r in same_song if not r.get("instrumental") and record_text(r) and (manual or _end_ok(r, length))]
     if not with_text:
         if any(r.get("instrumental") is True for r in same_song):
             return NO_LYRICS, None
         return NOT_FOUND, None
+    if manual:
+        # Explicit user choice: file length, timestamp end and text rate do not apply.
+        return FOUND, with_text[0]
     with_text = _prefer_original_script(with_text)
     with_text.sort(key=lambda r: abs((_duration(r) or 0) - length))
     camp = agreeing_camp(with_text[:MAX_COMPARED])
@@ -327,7 +331,7 @@ def _search(params: dict, cancel: threading.Event | None) -> list:
     return data if isinstance(data, list) else []
 
 
-def find(title: str, artist: str, length: float, *, cancel: threading.Event | None = None) -> LyricsResult:
+def find(title: str, artist: str, length: float, *, cancel: threading.Event | None = None, manual: bool = False) -> LyricsResult:
     """Look one track up. Never raises for network trouble: that is BUSY."""
     title, artist = _str(title).strip(), _str(artist).strip()
     if not title or not artist:
@@ -338,7 +342,7 @@ def find(title: str, artist: str, length: float, *, cancel: threading.Event | No
         length = float(length or 0)
     except (TypeError, ValueError):
         length = 0.0
-    if length <= 0:
+    if length <= 0 and not manual:
         return LyricsResult(NOT_FOUND)  # no length, no way to tell the versions apart
     queries = [
         {"track_name": title, "artist_name": artist},
@@ -375,17 +379,34 @@ def find(title: str, artist: str, length: float, *, cancel: threading.Event | No
                     continue
                 seen.add(key)
             records.append(r)
+    if manual:
+        choices = []
+        for record in records[:MAX_RECORDS]:
+            if pick([record], title, artist, 0, manual=True)[0] != FOUND:
+                continue
+            result = _record_result(record)
+            choices.append({"record_id": result.record_id, "title": _str(record.get("trackName")),
+                            "artist": _str(record.get("artistName")), "album": _str(record.get("albumName")),
+                            "text": result.text, "synced": result.synced})
+        if choices:
+            first = choices[0]
+            return LyricsResult(FOUND, first["text"], first["record_id"], first["synced"], choices=choices)
+        return LyricsResult(NOT_FOUND)
     status, record = pick(records, title, artist, length)
     if status == FOUND and record is not None:
-        rid = record.get("id")
-        synced = clean_text(_str(record.get("syncedLyrics")))
-        try:
-            if not synced_lines(synced):
-                synced = ""
-        except ValueError:
-            synced = ""
-        return LyricsResult(FOUND, record_text(record), rid if isinstance(rid, int) and not isinstance(rid, bool) else None, synced)
+        return _record_result(record)
     return LyricsResult(status)
+
+
+def _record_result(record: dict) -> LyricsResult:
+    rid = record.get("id")
+    synced = clean_text(_str(record.get("syncedLyrics")))
+    try:
+        if not synced_lines(synced):
+            synced = ""
+    except ValueError:
+        synced = ""
+    return LyricsResult(FOUND, record_text(record), rid if isinstance(rid, int) and not isinstance(rid, bool) else None, synced)
 
 
 def synced_lines(lrc: str) -> list[tuple[str, int]]:

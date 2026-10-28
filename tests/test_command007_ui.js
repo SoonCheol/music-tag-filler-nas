@@ -36,6 +36,11 @@ function create(){
   assert.equal(h.run('editingResult._lyricsEdited'),true);
   console.log('PASS: cached auto input, editable draft, L force only one candidate, manual force, user edits/deletion protected');
 
+  const transition=create();transition.run('applyCandidate(editingResult,editingResult.candidates[0])');await tick();
+  await transition.run('searchLyricsForCurrent()');assert.equal(transition.$('manualLyricsStatus').hidden,false);
+  transition.run('applyCandidate(editingResult,editingResult.candidates[1])');await tick();
+  assert.equal(transition.$('manualLyricsStatus').hidden,true);assert.equal(transition.$('changeLyrics').value,'Verified lyrics B');
+  console.log('PASS: candidate selection clears the previous manual-search notice');
   const stale=create();let release;const oldFetch=stale.context.fetch;
   stale.context.fetch=(url,options)=>url.endsWith('/candidate-lyrics')?new Promise(resolve=>release=resolve):oldFetch(url,options);
   stale.run('applyCandidate(editingResult,editingResult.candidates[0]);selectFile(1)');

@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v2.0.0` |
-| 이미지 ID | `sha256:431aee94e84f0441a160c943d613032f90cdf2766b21bed0929b51aedade20fc` |
+| 이미지 ID | `sha256:f14f7ed3b893b878ace0e2d98aa62e2c42974809e86bf15d7583de916b13aa2d` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -238,7 +238,7 @@ running/재시작0이었다. 당시 배포본에 `music-tag-filler-nas:rollback-
 통합 정렬한다. 관련 Linux Python 회귀 123개와 Node UI 검사가 통과했다.
 
 배포 전 실행 이미지 `sha256:448ff5fdd68e78e3b9818544fb8ea6266472b98b42a615a2d4ebae3bf69f5be1`을
-`music-tag-filler-nas:rollback-021-20261027`로 보존했다. 새 실행 이미지 ID는 상단 표와 같다.
+`music-tag-filler-nas:rollback-021-20261027`로 보존했다. 당시 새 실행 이미지는 `sha256:431aee94e84f0441a160c943d613032f90cdf2766b21bed0929b51aedade20fc`이다.
 기존 deploy-nas.ps1로 소스 백업 후 Portainer stack 32의 `music-tag-filler` 서비스만 재생성했다.
 포트·마운트·환경 설정을 유지했고 컨테이너 running/재시작0, HTTP 및 폴더 API 확인을 통과했다.
 
@@ -247,3 +247,27 @@ running/재시작0이었다. 당시 배포본에 `music-tag-filler-nas:rollback-
 운영 음악 파일 저장·이름 변경·복원·스캔과 GitHub push는 하지 않았다.
 실제 웹 HTML과 작업 목록 JavaScript 바이트가 배포 소스와 일치했다. Windows UI 검사 도구가 브라우저 창을
 재획득하지 못해 시각 화면 확인은 미완료다.
+
+
+## #022-v2 수동 가사 현재 입력값 및 길이 제한 제거 — 2026-10-27
+
+[상세 검증 기록](MANUAL_LYRICS_022.md). 수동 가사 검색 버튼만 화면 제목·가수 입력값을 직접 사용한다.
+항목 체크/빈 태그 옵션은 검색어를 바꾸지 않으며 기존 편집 가능 여부·저장 보호는 유지한다.
+수동 LRCLIB 검색에서 길이·마지막 타임스탬프·문자량/초 판정을 제외하고 사용자 승인으로 최소 후보 선택 목록을 추가했다.
+자동 후보 선택/확인 필요/자동 가사 조회의 길이 및 가사 일치 판정은 유지한다.
+
+최종 이미지의 실제 /app 코드로 격리 Linux 관련 검사 108개가 모두 통과했다. Node UI 3종과
+배포 설정·저장소 입력 검사를 통과했고, PC 루프백의 생성 음원 웹 화면에서 입력값·후보 선택·오류 표시를 확인했다.
+실제 LRCLIB는 `너 때문에`/`After School` 요청 HTTP 200·4건, 보조 요청 HTTP 200·0건,
+검증 후 241초 가사 후보 1건을 반환했다. 수동 검색에는 길이를 전달하지 않았다.
+
+기존 deploy-nas.ps1로 BuildOnly 검증 후 stack 32의 기존 서비스만 재생성했다.
+최종 실행 이미지 ID는 상단 표이며 running/재시작0, 마운트·설정·HTTP·폴더 API 및 실제 운영 화면 표시 확인.
+운영 HTML/CSS/가사·태그 JavaScript와 로컬 파일의 바이트 일치를 확인했다.
+복귀 태그 `music-tag-filler-nas:rollback-022-v2-20261027`은 변경 전 이미지
+`sha256:431aee94e84f0441a160c943d613032f90cdf2766b21bed0929b51aedade20fc`를 보존한다.
+변경 전 소스는 `deploy-backups/20261027-092821-1b5b56a0`, 마지막 안내 보완 전 소스는
+`deploy-backups/20261027-093336-1eaa7fb0`에 보존했다. 실제 롤백은 실행하지 않았다.
+배포 전후 /data 622개 파일(960,745,425 bytes)의 상대 이름+내용 집계 SHA-256은
+`ca028431097b83dfb36b46308af8624dcc26f39e20c32f923b15d63d43393201`로 동일하다.
+운영 음악 저장·이름 변경·복원·스캔 및 GitHub push는 실행하지 않았다.

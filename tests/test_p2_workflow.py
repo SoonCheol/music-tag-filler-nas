@@ -684,7 +684,9 @@ class P2Tests(unittest.TestCase):
         request = main.LyricsSearchRequest(path=row['path'], expected_revision=row['original']['revision'],
                                            title=row['original']['title'], artist=row['original']['artist'])
         entered, release = threading.Event(), threading.Event()
-        def lookup(*args):
+        def lookup(*args, **kwargs):
+            self.assertEqual(args[2], 0)
+            self.assertEqual(kwargs, {"manual": True})
             entered.set()
             self.assertTrue(release.wait(5))
             return main.original_lyrics.LyricsResult(main.original_lyrics.FOUND, 'Concurrent lyrics')
