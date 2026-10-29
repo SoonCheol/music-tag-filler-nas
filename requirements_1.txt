@@ -1,9 +1,0 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-mutagen==1.47.0
-musicbrainzngs==0.7.1
-requests==2.31.0
-pillow==10.3.0
-pyacoustid==1.2.2
-sqlalchemy==2.0.29
-python-multipart==0.0.9

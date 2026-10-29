@@ -104,3 +104,6 @@ Thumbs.db
 install-example/
 jobs/
 jobs_legacy.json
+
+# Local HTML design preview.
+/music_save_dialogs_preview.html

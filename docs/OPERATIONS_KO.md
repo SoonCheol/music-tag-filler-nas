@@ -8,8 +8,9 @@
    `app/job_service.py`, `app/preferences.py`, `app/static/index.html`, `app/upstream/`이다.
 4. 루트 `Dockerfile`, `requirements.txt`, `requirements.lock.txt`, `.dockerignore`,
    `portainer-stack.yml`, `docker-compose.yml`이 현재 빌드/설치 파일이다.
-5. `*_1`·`*_new`·`main_new.py`·`README_1.md`는 보존된 대안/과거 파일이다.
-   기본 실행 대상이 아니며 예전의 쓰기 가능한 음악 마운트를 운영에 적용하면 안 된다.
+5. #032에서 구버전·중복 파일 9개를 작업 트리에서 제거했다. 필요하면 정리 전 커밋
+   `2882cc597161b90458c3fa313726737735e4f4ca`에서 `git restore --source=2882cc597161b90458c3fa313726737735e4f4ca -- <파일 경로>`로 복구한다.
+   현재 실행 대상이 아니며 과거 설정을 운영에 적용하지 않는다.
 6. `FEATURE_COMPARISON.md`는 수정 전 감사, P0/P1/P2 문서는 단계별 기록이다.
    최신 UI 배치는 실제 index.html 및 CHANGELOG.md를 따른다.
 

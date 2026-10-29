@@ -13,7 +13,7 @@
 
 데이터 복구는 docs/BACKUP\_RESTORE\_KO.md를 따른다.
 활성 코드는 app/main.py, storage.py, search\_service.py, job\_service.py, preferences.py,
-static/index.html과 upstream/이다. *\_1·*\_new·README\_1.md는 보존된 대안이며 실행 대상이 아니다.
+static/index.html과 upstream/이다. #032에서 제거한 구버전·중복 파일 9개는 Git 이력에서 복구하며 실행 대상이 아니다.
 
 ## 개발 규칙
 
@@ -22,6 +22,20 @@ snake\_case와 기존 JavaScript camelCase·DOM ID를 유지한다. P0의 선택
 최초 원본 보존·무결성 검증·실제 바이트 복원·부분 실패 보고를 우회하지 않는다.
 새 모듈/빌드 입력은 배포 허용 목록·Docker context·복구 문서에 반영한다.
 의존성 변경은 requirements.txt와 requirements.lock.txt를 함께 검증한다.
+
+## 파일 생성 위치와 임시 파일 관리
+
+앞으로 모든 작업에서 프로젝트 폴더에는 실제 필요한 소스코드·설정·문서만 저장한다.
+임시 분석 파일·실행 로그·테스트 산출물·일회성 스크립트는 시스템 임시 폴더(`$env:TEMP`)에 저장하며,
+가능하면 작업별 하위 폴더를 사용한다. OneDrive의 문서 폴더에는 임시 파일을 생성하지 않는다.
+프로젝트 루트에 `*_1`, `*_new`, `*_backup` 등의 중복 파일을 임의로 생성하지 않는다.
+
+기존 소스와 문서는 가능한 한 해당 파일을 직접 수정한다.
+기존 `scratch` 자료는 삭제하거나 이동하지 않는다. 기존 작업 JSON·음악 파일·캐시·백업·롤백 자료도 삭제하지 않는다.
+사용자 승인 없이 기존 파일을 대량 정리하거나 이동하지 않는다.
+
+작업 완료 후에는 이번 작업에서 생성한 임시 파일만 안전하게 정리한다.
+기존에 있던 파일은 자동 삭제하지 않는다.
 
 ## 개발·검증 및 Codex 사용량 관리
 

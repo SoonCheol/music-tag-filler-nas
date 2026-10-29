@@ -35,7 +35,7 @@
 
 현재 설치에는 루트 `Dockerfile`, `requirements.txt`, `requirements.lock.txt`,
 `portainer-stack.yml`, `docker-compose.yml`을 사용합니다.
-`*_1`, `*_new`, `main_new.py`, `README_1.md`는 역사적 대안이며 운영에 적용하지 않습니다.
+구버전·중복 파일 9개는 #032 정리로 작업 트리에서 제거했습니다. 필요하면 정리 전 커밋 `2882cc597161b90458c3fa313726737735e4f4ca`에서 `git restore --source=2882cc597161b90458c3fa313726737735e4f4ca -- <파일 경로>`로 복구할 수 있습니다. 현재 실행·빌드·배포에는 사용하지 않습니다.
 
 ## 기존 NAS 업데이트 명령
 
