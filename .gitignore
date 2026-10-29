@@ -98,3 +98,9 @@ Thumbs.db
 *.xz
 *.zst
 *.enc
+
+# Local AI conversations and isolated installation data.
+.aider*
+install-example/
+jobs/
+jobs_legacy.json

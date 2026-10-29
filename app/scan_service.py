@@ -87,30 +87,30 @@ def scan_job(context: ScanContext, job_id: str, sub_path: str, opts: dict, resum
                        missing_paths=missing, diagnostic="기존 태그 읽는 중", search_wait_seconds=0)
             save_jobs(job_id)
         by_path = {r["path"]: r for r in rows}
-        ready = []
-        last_metadata_save = time.monotonic()
-        for path in pending:
-            if cancelled.is_set():
-                break
-            relative = path.relative_to(MUSIC_ROOT.resolve()).as_posix()
-            try:
-                original = storage.describe(path)
-                artist, title = parse_filename(path)
-                artist, title = original.get("artist") or artist, original.get("title") or title
-                with operation_lock:
-                    by_path[relative].update(original=original, parsed={"artist": artist, "title": title})
-                    job["view_revision"] = job.get("view_revision",0)+1
-                    if time.monotonic() - last_metadata_save >= 2:
+        def read_pending():
+            last_metadata_save = time.monotonic()
+            for index, path in enumerate(pending, 1):
+                if cancelled.is_set():
+                    break
+                relative = path.relative_to(MUSIC_ROOT.resolve()).as_posix()
+                try:
+                    original = storage.describe(path)
+                    artist, title = parse_filename(path)
+                    artist, title = original.get("artist") or artist, original.get("title") or title
+                    with operation_lock:
+                        by_path[relative].update(original=original, parsed={"artist": artist, "title": title})
+                        job["view_revision"] = job.get("view_revision",0)+1
+                        if time.monotonic() - last_metadata_save >= 2:
+                            save_jobs(job_id)
+                            last_metadata_save = time.monotonic()
+                    yield (path, relative, original, artist, title, time.perf_counter(), index)
+                except Exception as exc:
+                    with operation_lock:
+                        by_path[relative].update(error=str(exc), search_phase="error", file_state="error")
+                        job["scanned"] += 1
                         save_jobs(job_id)
-                        last_metadata_save = time.monotonic()
-                ready.append((path, relative, original, artist, title, time.perf_counter(), len(ready) + 1))
-            except Exception as exc:
-                with operation_lock:
-                    by_path[relative].update(error=str(exc), search_phase="error", file_state="error")
-                    job["scanned"] += 1
-                    save_jobs(job_id)
-        with operation_lock:
-            save_jobs(job_id)
+            with operation_lock:
+                save_jobs(job_id)
         def lookup(item):
             path, relative, original, artist, title, queued_at, index = item
             lookup_started = time.perf_counter()
@@ -125,7 +125,8 @@ def scan_job(context: ScanContext, job_id: str, sub_path: str, opts: dict, resum
                 found = search_service.search(path, original_match.build_query(title, artist), opts.get("country"),
                                               original.get("duration", 0), DATA_ROOT,
                                               use_fingerprint=opts.get("use_fingerprint", False), cancel=cancelled,
-                                              on_wait=lambda seconds: job.update(search_wait_seconds=seconds))
+                                              on_wait=lambda seconds: job.update(search_wait_seconds=seconds),
+                                              search_mode=opts.get("search_mode", "integrated"))
                 if cancelled.is_set():
                     return None
                 timing = found.pop("_timing", {})
@@ -160,7 +161,7 @@ def scan_job(context: ScanContext, job_id: str, sub_path: str, opts: dict, resum
             logging.getLogger("uvicorn.error").info("scan_timing %s", json.dumps(timing))
             return relative
         with ThreadPoolExecutor(max_workers=3) as pool:
-            iterator = iter(ready)
+            iterator = read_pending()
             futures = set()
             while not cancelled.is_set() and (futures or iterator is not None):
                 while len(futures) < 3 and iterator is not None and not cancelled.is_set():

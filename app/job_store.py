@@ -54,7 +54,7 @@ def save(root,jobs,ids=None):
             path.parent.mkdir(exist_ok=True)
             if created_folder:rename_service.sync_dir(root)
             storage._replace_file(path,data)
-            rename_service.sync_dir(path.parent)
+            # _replace_file already syncs the publication directory.
             _cache[key]=checksum
 
 def delete(root,ids):

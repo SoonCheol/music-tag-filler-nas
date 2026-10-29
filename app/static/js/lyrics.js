@@ -71,7 +71,7 @@ function manualLyricQueryKey(r){if(!r)return '';const tags=manualLyricTags(r);re
 function selectManualLyrics(index){
   const r=editingResult,state=r?._lyricsSearch,choice=state?.choices?.[Number(index)];
   if(!choice||saving||!state.manual||state.queryKey!==manualLyricQueryKey(r))return;
-  r._lyricsEdited=false;r._lyricsEpoch=(r._lyricsEpoch||0)+1;
+  r._lyricsEpoch=(r._lyricsEpoch||0)+1;
   r._lyricsSearch={...state,...choice,selectedIndex:Number(index)};updateSavePreview();
 }
 
@@ -81,29 +81,30 @@ function renderManualLyrics(r){
   box.disabled=saving||!!r?._lyricsRequest?.active||state?.queryKey!==manualLyricQueryKey(r);
   box.innerHTML=(choices||[]).map((c,i)=>`<option value="${i}">${esc(c.title)} — ${esc(c.artist)}${c.album?' · '+esc(c.album):''} · ${c.synced?'시간 가사':'일반 가사'} #${esc(c.record_id??i+1)}</option>`).join('');
   box.value=String(state?.selectedIndex||0);
-  const status=$('manualLyricsStatus');status.textContent=r?._manualLyricsStatus||'';status.hidden=!status.textContent;
+  const status=$('manualLyricsStatus');status.textContent=r?._lyricsEdited?(!commonSaveLyrics?'직접 입력한 가사 보관 중: 가사 저장 체크가 꺼져 있어 저장하지 않습니다.':protectedAsset(r,'lyrics')?'직접 입력한 가사 보관 중: 빈 태그만 채우기가 기존 가사를 보호하므로 저장하지 않습니다.':!r._lyricsDraft?.trim()?'빈 가사는 저장하지 않으며 기존 가사를 유지합니다.':'직접 입력한 가사를 저장합니다. 검색 결과보다 입력한 내용이 우선합니다.'):r?._manualLyricsStatus||'';status.hidden=!status.textContent;
 }
 
 function lyricQueryKey(r){const final=effectiveLyricTags(r);return JSON.stringify([final.title,final.artist]);}
 
-function lyricChoice(r){const state=r._lyricsSearch;return commonSaveLyrics&&!protectedAsset(r,'lyrics')&&state&&state.status!=='searching'&&state.lyrics_id&&state.queryKey===lyricQueryKey(r)&&(!state.candidateId||state.candidateId===r._candidateId)?state:null;}
+function lyricChoice(r,allowManualMismatch=false){if(r._lyricsEdited)return null;const state=r._lyricsSearch;const queryMatches=state&&(state.queryKey===lyricQueryKey(r)||(allowManualMismatch&&state.manual));return commonSaveLyrics&&!protectedAsset(r,'lyrics')&&state&&state.status!=='searching'&&state.lyrics_id&&queryMatches&&(!state.candidateId||state.candidateId===r._candidateId)?state:null;}
 
-function lyricPlan(r){
-  const choice=lyricChoice(r),existing=r.original?.has_lyrics&&!r.original?.lyrics_marker;
+function lyricPlan(r,allowManualMismatch=false){
+  const choice=lyricChoice(r,allowManualMismatch),existing=r.original?.has_lyrics&&!r.original?.lyrics_marker;
   if(!commonSaveLyrics||protectedAsset(r,'lyrics')||($('onlyEmpty').checked&&existing))return {change:false,text:null};
   const current=storedLyrics(r);
+  if(r._lyricsEdited){const text=r._lyricsDraft||'';return {change:!!text.trim()&&(!current||current.status!=='ready'||text.trim()!==current.lyrics.trim()),text:text.trim()?text:null};}
   if(choice){const valid=choice.status==='found'&&!!choice.lyrics?.trim();return {change:valid&&(!current||current.status!=='ready'||choice.lyrics.trim()!==current.lyrics.trim()),text:valid?choice.lyrics:null};}
   return {change:false,text:null};
 }
 
 function paintLyrics(id,text,empty=false,preview=false){
-  const box=$(id);if(id==='changeLyrics'){box.value=empty?'':text;box.placeholder=empty?text:'';box.textContent=text;}else if(box.textContent!==text){box.textContent=text;box.scrollTop=0;}
+  const box=$(id);if(id==='changeLyrics'){const value=empty?'':text;if(box.value!==value)box.value=value;box.placeholder=empty?text:'';}else if(box.textContent!==text){box.textContent=text;box.scrollTop=0;}
   box.className='lyrics-body'+(empty?' lyrics-empty':'')+(preview?' lyrics-preview':'');
 }
 
 function renderLyricsPanels(r,active=false,plan=null){
   renderManualLyrics(r);$('changeLyrics').title='';
-  $('changeLyrics').readOnly=!r||protectedAsset(r,'lyrics')||!r._lyricsSearch?.lyrics_id;
+  $('changeLyrics').readOnly=false;
   if(!r){paintLyrics('currentLyrics','가사 없음',true);paintLyrics('changeLyrics','검색 안 함',true);$('btnSearchLyrics').disabled=true;return;}
   loadStoredLyrics(r);const current=storedLyrics(r),state=r._lyricsSearch;
   const preview=active&&plan?.lyrics_text&&plan.lyrics&&(current?.status==='ready'||!r.original?.has_lyrics);
@@ -111,16 +112,17 @@ function renderLyricsPanels(r,active=false,plan=null){
   else if(current?.status==='loading')paintLyrics('currentLyrics','불러오는 중...',true);
   else if(current?.status==='error')paintLyrics('currentLyrics',current.message,true);
   else paintLyrics('currentLyrics',current?.lyrics||'가사 없음',!current?.lyrics);
-  if(!state)paintLyrics('changeLyrics','검색 안 함',true);
+  if(r._lyricsEdited)paintLyrics('changeLyrics',r._lyricsDraft||'');
+  else if(!state)paintLyrics('changeLyrics','가사를 직접 입력하거나 붙여넣으세요.',true);
   else if(state.status==='searching')paintLyrics('changeLyrics','검색 중...',true);
-  else if(state.queryKey!==(state.manual?manualLyricQueryKey(r):lyricQueryKey(r))||(!r._lyricsEdited&&state.candidateId&&state.candidateId!==r._candidateId)){
+  else if((!state.manual&&state.queryKey!==lyricQueryKey(r))||(!r._lyricsEdited&&state.candidateId&&state.candidateId!==r._candidateId)){
     paintLyrics('changeLyrics',state.lyrics||'태그가 변경되었습니다. 다시 검색해 주세요.',!state.lyrics);
     $('changeLyrics').title='현재 선택한 곡과 검색 조건이 달라 저장에서 제외됩니다. 가사를 다시 검색해 주세요.';
   }
   else if(state.status==='found'&&(state.lyrics||r._lyricsEdited))paintLyrics('changeLyrics',state.lyrics);
   else if(state.status==='not_found')paintLyrics('changeLyrics','검색 결과 없음',true);
   else paintLyrics('changeLyrics',state.message||'가사 검색 오류가 발생했습니다. 다시 시도해 주세요.',true);
-  if(r._lyricsLookupStatus&&!state)paintLyrics('changeLyrics',r._lyricsLookupStatus==='not_found'?'검색 결과 없음':'가사 조회 오류',true);
+  if(r._lyricsLookupStatus&&!state&&!r._lyricsEdited)paintLyrics('changeLyrics',r._lyricsLookupStatus==='not_found'?'검색 결과 없음':'가사 조회 오류',true);
   $('btnSearchLyrics').disabled=!!r._lyricsRequest?.active||saving;
 }
 

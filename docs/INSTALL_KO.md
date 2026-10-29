@@ -105,3 +105,7 @@ AcoustID는 키 없이 실제 조회할 수 없다. 발급한 애플리케이션
 옛 NAS와 새 NAS가 같은 data 또는 음악을 동시에 쓰지 않도록 한다.
 새 서버의 Docker·CPU 차이에 대해서는 격리 회귀 테스트와 preflight를 다시 통과시킨다.
 필요한 계정·키·음악·data 백업이 없다면 GitHub 소스만으로 그 내용을 복원할 수 없다.
+
+## 개인 경로 없는 신규 설치 예시
+
+운영과 분리된 신규 Compose 설치는 [README의 설치 예시](../README.md)와 루트 compose.example.yml을 따른다. 기존 운영 설치에는 적용하지 않는다. .env.example은 지원 변수 설명용이며 기존 Compose의 자동 입력 파일이 아니다.

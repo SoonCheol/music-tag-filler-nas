@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 // Load each classic script in the same order and scope as the page.
 const pageHtml = fs.readFileSync('app/static/index.html', 'utf8');
-const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1]);
+const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1].split('?')[0]);
 assert.equal(scriptPaths.length, 6);
 assert.equal(scriptPaths.at(-1), 'app/static/js/app.js');
 assert.equal(new Set(scriptPaths).size, scriptPaths.length);
@@ -17,7 +17,7 @@ const script = uiScripts.map(s => s.source).join('\n');
 // Preserve the existing source assertions across the split assets.
 const html = pageHtml
   .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
-  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p, 'utf8') + '</script>');
+  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p.split('?')[0], 'utf8') + '</script>');
 const elements = new Map(), checks = [], sent = [], notices = [];
 function element() {
   return { value: '', checked: false, hidden: true, style: {setProperty(k,v){this[k]=v;}}, children: [], listeners: {},
@@ -52,10 +52,10 @@ const context = vm.createContext({ console, Set, Map, encodeURIComponent, clearT
 uiScripts.forEach(s => vm.runInContext(s.source, context, {filename:s.path}));
 function run(source) { return vm.runInContext(source, context); }
 async function acceptSave(source) {
-  const pending=run(source);assert.equal($('actionDialog').open,true);
-  assert.equal($('actionAccept').textContent,'저장 실행');
-  assert.equal($('actionCancel').textContent,'취소');
-  run('resolveAction(true)');await pending;
+  const pending=run(source);assert.equal($('saveConfirmDialog').open,true);
+  assert.equal($('saveConfirmAccept').textContent,'저장 실행');
+  assert.equal($('saveConfirmCancel').textContent,'취소');
+  run('resolveSaveConfirm(true)');await pending;
 }
 function result(path) {
   return { path, file_state: 'auto', original: { title: 'Original', artist: 'Singer', album: 'Album', revision: 'a'.repeat(64) },
@@ -172,13 +172,26 @@ function result(path) {
     const source=mode==='current'?'saveCurrent()':'saveAll()';
     const before=sent.length,pending=run(source);
     assert.equal(sent.length,before);assert.equal(run('saving'),true);
-    assert.match($('actionMessage').textContent,/빈칸만:.*파일명 변경:/);
+    assert.match($('saveConfirmBody').innerHTML,mode==='current'?/저장 항목/:/파일명 자동 변경/);
     await run(source);assert.equal(sent.length,before); // No duplicate submission.
-    run('resolveAction(false)');await pending;
+    run('resolveSaveConfirm(false)');await pending;
     assert.equal(sent.length,before);assert.equal(run('saving'),false);
-    const escaped=run(source);$('actionDialog').listeners.cancel({preventDefault(){}});await escaped;
+    const escaped=run(source);run('resolveSaveConfirm(false)');await escaped;
     assert.equal(sent.length,before);assert.equal(run('saving'),false);
   }
+  context.mismatchJob={id:'mismatch',results:[result('mismatch.mp3')]};run('adoptJob(mismatchJob);toggleAllChange(true)');
+  const mismatchCases=[['Final title','Singer',['제목']],['Original','New singer',['가수']],['Final title','New singer',['제목','가수']]];
+  for(const [title,artist,labels] of mismatchCases){
+    $('chg_title').value=title;$('chg_title').listeners.input();$('chg_artist').value=artist;$('chg_artist').listeners.input();
+    run("editingResult._lyricsSearch={status:'found',manual:true,lyrics_id:'manual-token',lyrics:'verified',queryKey:JSON.stringify(['Original','Singer']),query_title:'Original',query_artist:'Singer'}");
+    assert.deepEqual(Array.from(run('manualMismatch(editingResult).map(x=>x.label)')),labels);
+  }
+  const mismatchBefore=sent.length,mismatchSave=run('saveCurrent()');assert.equal($('saveConfirmAccept').textContent,'확인 후 저장');
+  assert.match($('saveConfirmBody').innerHTML,/가사 검색 정보 불일치/);assert.match($('saveConfirmBody').innerHTML,/저장할 태그/);
+  run('resolveSaveConfirm(false)');await mismatchSave;assert.equal(sent.length,mismatchBefore);assert.equal($('chg_title').value,'Final title');assert.equal($('chg_artist').value,'New singer');
+  const approved=run('saveCurrent()');run('resolveSaveConfirm(true)');await approved;
+  assert.equal(sent.at(-1).body.items[0].approve_manual_lyrics_mismatch,true);assert.equal(sent.at(-1).body.rename,false);
+  assert.equal(sent.at(-1).body.items[0].values.title,'Final title');assert.equal(sent.at(-1).body.items[0].values.artist,'New singer');
   const saveHandler=script.slice(script.indexOf('async function submitSave'),script.indexOf('async function saveCurrent'));
   assert(!/\bconfirm\(/.test(saveHandler));
   // Preview only reads drafts: all request counts and save payloads stay unchanged.
@@ -260,8 +273,8 @@ function result(path) {
     $('onlyEmpty').checked=true;run('updateSavePreview()');
     $('onlyEmpty').checked=false;run('updateSavePreview()');assert.equal($('cur_artist').textContent,'My manual band');
   }
-  run('reportSave({saved:1,skipped:2,failed:0,partial:0,unchanged:1,unselected:1,results:[]})');
-  assert.match($('saveResultCounts').innerHTML,/변경 없음: 1/);assert.match($('saveResultCounts').innerHTML,/미선택: 1/);
+  run("reportSave({saved:1,skipped:2,failed:0,partial:0,unchanged:1,unselected:1,results:[]},'selected',[],new Map())");
+  assert.match($('saveResultCounts').innerHTML,/변경 없음/);assert.match($('saveResultCounts').innerHTML,/<strong>1<\/strong>/);
   context.statesJob={id:'states',results:[result('auto1.mp3'),{...result('review.mp3'),file_state:'review'},
     {...result('saved.mp3'),file_state:'saved'},result('auto2.mp3')]};
   $('fileFilter').value='';run('adoptJob(statesJob);currentResults.forEach(r=>r._checked=true);renderFileList()');
@@ -280,5 +293,48 @@ function result(path) {
   assert.equal(run('editingResult.path'),'saved.mp3');assert.equal($('btnSaveCurrent').disabled,false);
   await run('requestSelectFile(1)');assert.equal($('chg_title').value,'Original');
   assert.equal(run('fileState(editingResult)'),'review'); // Editing never promotes status.
-  console.log('PASS: candidate identity, edited values, field mask, drafts across files/polls, exact selected/filter/all scope, job isolation.');
+  // Direct lyrics are independent of search tokens and survive redraws/polls.
+  context.directJob={id:'direct',results:[result('direct.mp3')]};
+  const lyricMarkup=pageHtml.match(/<textarea\b[^>]*id="changeLyrics"[^>]*>/)[0];
+  assert(!/\s(?:readonly|disabled)(?:\s|=|>)/i.test(lyricMarkup));
+  assert(pageHtml.includes('/static/js/lyrics.js?v=024-input2'));
+  assert(pageHtml.includes('/static/js/app.js?v=024-input2'));
+  run('adoptJob(directJob)');$('onlyEmpty').checked=false;run('updateSavePreview()');
+  run("editingResult.original.revision='';saving=true;updateSavePreview()");
+  assert.equal($('changeLyrics').readOnly,false);
+  run("editingResult.original.revision='a'.repeat(64);saving=false;updateSavePreview()");
+  assert.equal($('changeLyrics').readOnly,false);
+  const directText='직접 입력한 가사\nPasted second line';
+  $('changeLyrics').value=directText;$('changeLyrics').listeners.input();
+  run("editingResult._lyricsSearch={status:'not_found'};updateSavePreview()");
+  assert.equal($('changeLyrics').value,directText);
+  context.directPoll={id:'direct',results:[result('direct.mp3')]};
+  run("editingResult._lyricsSearch={status:'searching'};updateSavePreview();adoptJob(directPoll)");
+  assert.equal($('changeLyrics').value,directText);
+  assert.equal(run('saveItem(editingResult).lyrics_text'),directText);
+  assert.equal(run('saveItem(editingResult).lyrics_id'),null);
+  $('saveLyrics').checked=false;run('captureCurrent();updateSavePreview()');
+  assert.equal(run('saveItem(editingResult).lyrics_text'),null);
+  assert.match($('manualLyricsStatus').textContent,/체크가 꺼져/);
+  assert.equal($('changeLyrics').value,directText);
+  $('saveLyrics').checked=true;run('captureCurrent();editingResult.original.has_lyrics=true');
+  $('onlyEmpty').checked=true;run('updateSavePreview()');
+  assert.equal($('changeLyrics').readOnly,false);
+  assert.equal(run('saveItem(editingResult).lyrics_text'),null);
+  assert.match($('manualLyricsStatus').textContent,/기존 가사를 보호/);
+  $('onlyEmpty').checked=false;run('updateSavePreview()');
+  await acceptSave('saveCurrent()');
+  assert.equal(sent.at(-1).body.items[0].lyrics_text,directText);
+  assert.equal(sent.at(-1).body.save_lyrics,true);
+  // Searched lyrics remain editable and editing does not mutate search provenance.
+  context.searchedJob={id:'searched',results:[result('searched.mp3')]};run('adoptJob(searchedJob)');
+  run("editingResult._lyricsSearch={status:'found',lyrics:'Search result',lyrics_id:'token',queryKey:lyricQueryKey(editingResult)};updateSavePreview()");
+  assert.equal($('changeLyrics').readOnly,false);
+  $('changeLyrics').value='Edited search result';$('changeLyrics').listeners.input();
+  assert.equal(run('saveItem(editingResult).lyrics_text'),'Edited search result');
+  assert.equal(run('editingResult._lyricsSearch.lyrics'),'Search result');
+  $('changeLyrics').value='';$('changeLyrics').listeners.input();
+  assert.equal(run('saveItem(editingResult).lyrics_text'),null);
+  assert.match($('manualLyricsStatus').textContent,/빈 가사는 저장하지/);
+  console.log('PASS: save UI, direct/searched lyric edits, draft preservation, checkbox/protection and save payload.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

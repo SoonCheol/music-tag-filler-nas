@@ -2,15 +2,23 @@
 
 ## 인계와 활성 구조
 
-작업 전 README.md와 docs/CURRENT_NAS.md를 읽는다. 설치는 docs/INSTALL_KO.md,
-업데이트는 docs/OPERATIONS_KO.md, 데이터 복구는 docs/BACKUP_RESTORE_KO.md를 따른다.
-활성 코드는 app/main.py, storage.py, search_service.py, job_service.py, preferences.py,
-static/index.html과 upstream/이다. *_1·*_new·README_1.md는 보존된 대안이며 실행 대상이 아니다.
+작업 시작 시 README.md와 docs/CURRENT\_NAS.md는 현재 요청과 관련된 부분만 확인한다.
+
+동일 세션에서 이미 확인했고 변경되지 않았다면 다시 읽지 않는다.
+
+필요한 설정이나 구조가 불확실할 때만 추가 확인한다.
+
+설치는 docs/INSTALL\_KO.md,
+업데이트는 docs/OPERATIONS\_KO.md,
+
+데이터 복구는 docs/BACKUP\_RESTORE\_KO.md를 따른다.
+활성 코드는 app/main.py, storage.py, search\_service.py, job\_service.py, preferences.py,
+static/index.html과 upstream/이다. *\_1·*\_new·README\_1.md는 보존된 대안이며 실행 대상이 아니다.
 
 ## 개발 규칙
 
 기존 v6 UI와 정상 기능을 보존하고 요청한 부분만 변경한다. Python 4칸 들여쓰기,
-snake_case와 기존 JavaScript camelCase·DOM ID를 유지한다. P0의 선택 범위·후보/리비전 검사,
+snake\_case와 기존 JavaScript camelCase·DOM ID를 유지한다. P0의 선택 범위·후보/리비전 검사,
 최초 원본 보존·무결성 검증·실제 바이트 복원·부분 실패 보고를 우회하지 않는다.
 새 모듈/빌드 입력은 배포 허용 목록·Docker context·복구 문서에 반영한다.
 의존성 변경은 requirements.txt와 requirements.lock.txt를 함께 검증한다.
@@ -39,9 +47,9 @@ NAS 접속·배포·화면 확인이 불가능하면 성공으로 간주하지 �
 ### GitHub Push 전 — 종합 검증
 
 전체 회귀 검증은 GitHub Push 또는 릴리스 준비 시 집중 실행한다.
-Node: tests/test_ui_save.js, tests/test_p2_ui.js, tests/test_gitignore.js, tests/test_repository_readiness.js.
+Node: tests/test\_ui\_save.js, tests/test\_p2\_ui.js, tests/test\_gitignore.js, tests/test\_repository\_readiness.js.
 PowerShell: tests/deploy-nas.tests.ps1 (프로세스 범위 ExecutionPolicy Bypass).
-Linux Docker: unittest discover -s tests -p 'test_p*.py'.
+Linux Docker: unittest discover -s tests -p 'test\_p\*.py'.
 전체 검증 결과·실패·미실행 항목을 보고하고, 실패가 있으면 사용자 확인 없이 Push하지 않는다.
 단, 배포·저장·복원 등 고위험 변경은 Push 전이라도 필요한 범위까지 검증한다.
 
@@ -53,7 +61,7 @@ CI는 검증만 하며 NAS에 접속하지 않는다.
 
 ## NAS 배포와 복구
 
-정식 이름 이전 작업은 docs/V1_REGISTRATION_STATUS.md를 먼저 확인한다.
+정식 이름 이전 작업은 docs/V1\_REGISTRATION\_STATUS.md를 먼저 확인한다.
 현재 고정 스택·컨테이너·서비스 이름은 music-tag-filler, 이미지는 music-tag-filler-nas:v2.0.0이다.
 2026-10-21 Portainer 공식 API로 이전 완료했다. 스택 ID 32와 관리자 전용 접근 제어를 보존했다.
 이후에는 고정 이름을 유지하고 이미지 버전 태그만 갱신한다. NAS 호스트 경로는 바꾸지 않는다.
@@ -74,8 +82,9 @@ push/tag/remote 변경은 별도 명시 요청이 있을 때만 한다. git init
 명시적으로 검토한 파일만 stage하며 git add -f를 쓰지 않는다.
 개인키·비밀번호·실제 API 키·data·음악·백업 원본·로그를 commit하지 않는다.
 운영 IP·계정·폴더·키 위치라는 비밀값 아닌 메타데이터는 사용자의 명시 요청으로
-docs/CURRENT_NAS.md와 현재 YAML에 보관한다. 이를 비밀 누출로 오인해 삭제하지 말고 저장소 비공개를 유지한다.
+docs/CURRENT\_NAS.md와 현재 YAML에 보관한다. 이를 비밀 누출로 오인해 삭제하지 말고 저장소 비공개를 유지한다.
 deploy-nas.local.json은 여전히 제외한다. .gitignore는 내용 검사나 과거 기록 삭제를 대신하지 않는다.
+
 ### 변경 이력 관리
 
 기능 추가·개선·버그 수정 후 GitHub에 push할 때마다, push 전에 CHANGELOG.md를 함께 갱신하고 커밋한다.
@@ -85,3 +94,42 @@ Git 커밋 날짜 기준으로 날짜별 추가 기능·기능 개선·버그 �
 같은 날짜의 중복 항목은 최종 동작 중심으로 정리하고, 기능 변경이 없는 문서 정리에는 기능을 꾸며 추가하지 않는다.
 릴리스에는 CHANGELOG와 테스트·배포한 커밋/이미지 ID를 기록한다.
 원본 MIT 고지와 licenses/를 보존하고, 추가 코드 전체의 라이선스를 임의로 선언하지 않는다.
+
+## 현재 모듈·상태 경계
+
+README의 주요 폴더 표와 docs/SCAN_SERVICE.md, docs/LYRICS_SERVICE.md,
+docs/UI_JAVASCRIPT.md를 작업 범위에 맞게 참고한다. main은 API·공유 jobs·시계·저장 콜백을
+소유한다. request_models는 입력 검증, scan_service는 ScanContext로 기존 참조/잠금을 받아
+파일 읽기와 최대 3개 검색을 진행한다. main을 역으로 import하거나 공유 상태를 복제하지 않는다.
+job_service는 수집·상태·이어하기, job_store는 data/jobs/<id>.json 원자 저장을 담당한다.
+기존 jobs.json은 jobs_legacy.json으로 덮어쓰기 없이 보관하며 자동 삭제/가져오기를 하지 않는다.
+재시작 시 활성 스캔은 interrupted가 될 수 있다. 저장 작업 진행 목록·가사/커버 캐시·토큰은
+메모리 상태이므로 영구 작업 기록/사용자 초안과 혼동하지 않는다. Uvicorn worker는 1을 유지한다.
+
+search_service는 iTunes/MusicBrainz/AcoustID 후보 조합과 커버를 담당하고 upstream/net은
+외부 요청 제한·재시도·검색 캐시를 담당한다. lyrics_service는 가사 캐시·Future 병합·토큰을
+소유한다. 제공처 호출을 저장 잠금 안으로 옮기거나 캐시 키의 국가·쿼리·리비전 경계를 생략하지 않는다.
+검색 모드와 강제 재검색의 의미, 후보 ID·검색 generation 검사와 사용자 선택 보존을 유지한다.
+
+storage의 OPERATION_LOCK·원본 SHA256·최초 바이트 백업·manifest·원자 게시/fsync를 보존한다.
+rename_service와 lyric_assets의 복구 저널을 우회하지 않는다. main/storage/관련 모듈과
+static/js의 모든 파일은 같은 버전으로 빌드·복원한다. 저장 후 일부 실패를 전체 성공으로 표시하지 않는다.
+수동 태그·직접 입력 가사·선택 후보·수동 커버를 늦은 검색 응답으로 덮어쓰지 않는다.
+가사 불일치 승인은 명시된 수동 선택에 한정하고 파일/리비전 검증은 계속 적용한다.
+빈 가사·빈 커버·체크 해제 항목은 기존 데이터 삭제 명령으로 취급하지 않는다.
+
+## 문서·설치 예시 작업의 최소 검증
+
+문서/예시만 바꾸며 사용자가 대규모 검증을 금지한 경우 해당 제한이 전체 회귀 지침보다 우선한다.
+git diff --check, 문서 링크/저장소 준비 검사, gitignore 검사와 가능한 Compose 정적 검증을 수행한다.
+기존 기능 변경까지 업로드하더라도 실행하지 않은 회귀·Docker 빌드·화면·NAS 검증은 명시한다.
+과거 테스트 통과 기록을 이번 커밋의 통과 결과로 쓰지 않는다.
+운영 음악은 테스트 입력·수정·삭제 대상으로 절대 사용하지 않는다. 작업 JSON·캐시·백업도 지우지 않는다.
+compose.example.yml은 신규 격리 설치만 위한 예시이며 운영 YAML은 기존 값을 유지한다.
+.env.example은 설명용이다. .env 로딩이 자동으로 Python 또는 기존 Compose에 연결된다고 가정하지 않는다.
+
+GitHub 업로드 전 AI 대화 이력·개인 데이터·임시 미리보기·실행 로그도 제외한다.
+.gitignore는 추적 중 파일이나 과거 커밋을 숨기지 않으므로 전송할 커밋과 파일 내용도 검사한다.
+기존 운영 메타데이터 문서는 역사 기록이며 새 설치 예시에 개인 계정·주소·키 경로를 복사하지 않는다.
+롤백은 docs/OPERATIONS_KO.md를 따르며 보존된 이미지/기존 정의와 data 호환성을 확인한다.
+배포 스크립트의 rollback-* 태그 보존은 자동 복귀를 뜻하지 않는다. 배포·볼륨 삭제는 별도 요청 없이 실행하지 않는다.

@@ -4,13 +4,16 @@ The first original is immutable. Full original bytes supplement upstream's tag
 layout backup so exact undo is available even when a format needs its fallback.
 All callers must hold OPERATION_LOCK across revision checks and mutations.
 """
+import functools
 import hashlib
 import json
+import logging
 import os
 import shutil
 import stat
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from .upstream import tags, search_lyrics
@@ -37,6 +40,33 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _trace_slow_storage(fn):
+    @functools.wraps(fn)
+    def measured(*args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            elapsed = time.perf_counter() - started
+            if elapsed >= 0.25:
+                target = str(args[0]) if args else ""
+                if fn.__name__ == "_fsync":
+                    try:
+                        target = os.readlink("/proc/self/fd/" + target)
+                    except OSError:
+                        target = "file descriptor " + target
+                logging.getLogger("uvicorn.error").info("save_storage_timing %s", json.dumps({
+                    "phase": fn.__name__, "seconds": round(elapsed, 6),
+                    "thread": threading.get_ident(), "target": target}))
+    return measured
+
+
+@_trace_slow_storage
+def _fsync(fd):
+    os.fsync(fd)
+
+
+@_trace_slow_storage
 def revision(path):
     h = hashlib.sha256()
     with open(path, "rb") as source:
@@ -85,11 +115,13 @@ def _json_bytes(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+@_trace_slow_storage
 def _sync_dir(path):
     from . import rename_service
     rename_service.sync_dir(path)
 
 
+@_trace_slow_storage
 def _new_file(path, data):
     """Publish a fully written file without replacing an existing first backup."""
     fd, name = tempfile.mkstemp(prefix=".tagbak-", dir=path.parent)
@@ -97,20 +129,21 @@ def _new_file(path, data):
         with os.fdopen(fd, "wb") as output:
             output.write(data)
             output.flush()
-            os.fsync(output.fileno())
+            _fsync(output.fileno())
         os.link(name, path)  # fails closed if the destination already exists
         _sync_dir(path.parent)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
+@_trace_slow_storage
 def _replace_file(path, data):
     fd, name = tempfile.mkstemp(prefix=".tagtxn-", suffix=path.suffix, dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as output:
             output.write(data)
             output.flush()
-            os.fsync(output.fileno())
+            _fsync(output.fileno())
         if path.exists():
             os.chmod(name, stat.S_IMODE(path.stat().st_mode))
         os.replace(name, path)
@@ -164,6 +197,7 @@ def _sync_backup(folder, music):
     _sync_dir(music.parent)
 
 
+@_trace_slow_storage
 def ensure_backup(path, root, backup_root, expected):
     sidecar = Path(tags.backup_path(str(path)))
     if sidecar.exists():
@@ -204,7 +238,7 @@ def ensure_backup(path, root, backup_root, expected):
         (temporary / "manifest.sha256").write_text(digest(manifest_bytes), encoding="ascii")
         for child in temporary.iterdir():
             with child.open("rb") as stream:
-                os.fsync(stream.fileno())
+                _fsync(stream.fileno())
         _sync_dir(temporary)
         temporary.rename(destination)
         _sync_dir(backup_root)
@@ -234,6 +268,7 @@ def prepare_cover_change(data, current, max_px=1000):
     return None if prepared == current else prepared
 
 
+@_trace_slow_storage
 def save(path, root, backup_root, values, fields, only_empty, expected,
          cover=None, lyrics=None, rename=False, ids=None, replace_lyrics=False, synced=None, lrc=None, asset_root=None, rename_context=None):
     # Direct callers use the same lock and recovery gate as the HTTP save path.
@@ -326,7 +361,7 @@ def _save_locked(path, root, backup_root, values, fields, only_empty, expected,
                 raise StorageError("저장 도중 원본이 변경되었습니다")
             os.chmod(stage, stat.S_IMODE(path.stat().st_mode))
             with stage.open("rb") as stream:
-                os.fsync(stream.fileno())
+                _fsync(stream.fileno())
             if lrc_needed:
                 asset = lyric_assets.begin(path, lrc, root, asset_root or Path(backup_root).parent, expected, revision(stage))
             committed_revision = revision(stage)

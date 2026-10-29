@@ -237,7 +237,8 @@ class PathRecoveryTests(unittest.TestCase):
         with patch.object(main, 'save_one', side_effect=without_original):
             outcome = main.save_job('test', request)
         new = self.root / outcome['results'][0]['path']
-        self.assertFalse(old.exists())
+        self.assertTrue(old.exists())
+        self.assertEqual(new, old)
         self.assertTrue(new.is_file())
         self._assert_jobs(new.name, new.name)
         self.assertEqual(row['abs_path'], str(new))
@@ -273,7 +274,7 @@ class PathRecoveryTests(unittest.TestCase):
         self.assertNotIn('error', json.loads(journal.read_bytes()))
         self._restore(new)
 
-    def test_post_rename_describe_failure_reports_actual_path_and_restart_retry_is_noop(self):
+    def test_automatic_rename_is_disabled_even_when_postsave_describe_is_faulted(self):
         old = self._prepare()
         row = main.jobs['test']['results'][0]
         request = main.SaveRequest(**self.request([self.item(row)], rename=True))
@@ -288,18 +289,10 @@ class PathRecoveryTests(unittest.TestCase):
 
         with patch.object(storage, 'describe', side_effect=fail):
             outcome = main.save_job('test', request)
-        self.assertEqual(len(hits), 1)
-        new = Path(hits[0])
+        self.assertEqual(hits, [])
+        new = old
         self.assertEqual(outcome['results'][0]['path'], new.name)
         self.assertEqual(outcome['results'][0]['request_path'], old.name)
-        self._reload()
-        self._recover()
-        self._assert_jobs(new.name, new.name)
-        current = main.jobs['test']['results'][0]
-        with patch.object(ren, 'no_replace') as move:
-            retry = main.save_job('test', main.SaveRequest(**self.request([self.item(current)], rename=True)))
-        move.assert_not_called()
-        self.assertEqual(retry['skipped'], 1)
         self._restore(new)
 
     def test_reconciliation_save_retry_in_same_process_persists_memory(self):

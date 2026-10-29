@@ -14,6 +14,8 @@ class ManualLyricsTests(unittest.TestCase):
     tearDown = p0.P0Tests.tearDown
     copy = p0.P0Tests.copy
     job = p0.P0Tests.job
+    item = p0.P0Tests.item
+    request = p0.P0Tests.request
     http = p0.P0Tests.http
 
     def records(self):
@@ -46,6 +48,40 @@ class ManualLyricsTests(unittest.TestCase):
             self.assertEqual(entry["lyrics"], choice["lyrics"])
             with self.assertRaises(storage.StorageError):
                 main.selected_lyrics("test", row["path"], row["original"]["revision"], choice["lyrics_id"], "Original song", "Edited Singer")
+            approved = main.selected_lyrics("test", row["path"], row["original"]["revision"], choice["lyrics_id"], "Original song", "Edited Singer", True)
+            self.assertEqual(approved["lyrics"], choice["lyrics"])
+            with self.assertRaises(storage.StorageError):
+                main.selected_lyrics("other", row["path"], row["original"]["revision"], choice["lyrics_id"], "Original song", "Edited Singer", True)
+
+    def test_approval_never_allows_automatic_search_token_mismatch(self):
+        service = main._lyrics_service
+        result = lyrics.LyricsResult(lyrics.FOUND, "Verified automatic lyrics")
+        entry = service.remember_lyrics((str(main.MUSIC_ROOT.resolve()), "test", "automatic.mp3", "revision", "Searched", "Artist"), result, manual=False)
+        with self.assertRaises(storage.StorageError):
+            main.selected_lyrics("test", "automatic.mp3", "revision", entry["lyrics_id"], "Different", "Artist", True)
+
+    def test_current_save_approval_keeps_user_tags_and_never_renames(self):
+        path = self.copy("mismatch-save.mp3")
+        row = self.job([path])[0]
+        with patch.object(lyrics, "_search", side_effect=[self.records(), []]):
+            search = self.search(row)
+        selected = main.selected_lyrics("test", row["path"], row["original"]["revision"], search["choices"][0]["lyrics_id"], "User's final title", row["original"]["artist"], True)
+        self.assertEqual(selected["status"], "found")
+        item = self.item(row, fields=["title"], values={"title": "User's final title"}, lyrics_id=search["choices"][0]["lyrics_id"])
+        payload = self.request([item], save_lyrics=True, only_empty=False, rename=True)
+        before = path.read_bytes()
+        with patch.object(main.rename_service, "sync_dir"):
+            rejected = self.http(payload)
+            self.assertEqual(rejected["failed"], 1)
+            self.assertEqual(path.read_bytes(), before)
+            payload["items"][0]["approve_manual_lyrics_mismatch"] = True
+            saved = self.http(payload)
+        self.assertEqual(saved["failed"], 0, saved)
+        self.assertEqual(saved["saved"], 1)
+        self.assertEqual(path.name, "mismatch-save.mp3")
+        info = p0.tags.read_file(str(path))
+        self.assertEqual(info.tags.title, "User's final title")
+        self.assertEqual(info.lyrics, search["choices"][0]["lyrics"])
 
     def test_manual_retains_title_artist_version_and_text_validation(self):
         records = self.records()

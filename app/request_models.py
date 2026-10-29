@@ -13,6 +13,7 @@ class ScanRequest(BaseModel):
     fill_lyrics: bool = False
     rename: bool = False
     use_fingerprint: bool = False
+    search_mode: Literal["integrated", "itunes", "musicbrainz", "quick"] = "integrated"
     force: bool = False
     country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
 
@@ -37,6 +38,7 @@ class SaveItem(BaseModel):
     cover_id: Optional[str] = None
     include_ids: bool = False
     lyrics_id: Optional[str] = None
+    approve_manual_lyrics_mismatch: bool = False
     lyrics_text: Optional[str] = Field(default=None, max_length=30000)
 
 
@@ -77,6 +79,8 @@ class SearchRequest(BaseModel):
     path: str
     query: str = Field(default="", max_length=500)
     mode: Literal["text", "sound"] = "text"
+    search_mode: Literal["integrated", "itunes", "musicbrainz", "quick"] = "integrated"
+    preserve_candidate_id: Optional[str] = None
     country: Optional[Literal["KR", "US", "JP", "CN", "TW", "HK", "GB", "DE", "FR"]] = None
     use_fingerprint: bool = False
     expected_revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 // Load each classic script in the same order and scope as the page.
 const pageHtml = fs.readFileSync('app/static/index.html', 'utf8');
-const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1]);
+const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1].split('?')[0]);
 assert.equal(scriptPaths.length, 6);
 assert.equal(scriptPaths.at(-1), 'app/static/js/app.js');
 assert.equal(new Set(scriptPaths).size, scriptPaths.length);
@@ -17,7 +17,7 @@ const script = uiScripts.map(s => s.source).join('\n');
 // Preserve the existing source assertions across the split assets.
 const html = pageHtml
   .replace('<link rel="stylesheet" href="/static/css/style.css">', () => '<style>' + fs.readFileSync('app/static/css/style.css', 'utf8') + '</style>')
-  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p, 'utf8') + '</script>');
+  .replace(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g, (_,p) => '<script>' + fs.readFileSync('app' + p.split('?')[0], 'utf8') + '</script>');
 const memory = new Map();
 function harness() {
   const elements = new Map(), checks = [], calls = [], documentEvents = {};
@@ -173,7 +173,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
     assert.equal(body.title,'너 때문에');assert.equal(body.artist,'After School');assert.equal(body.force,true);
     assert.equal(manualUI.$('changeLyrics').value,'Fixture candidate one lyric text');assert.equal(manualUI.$('manualLyricsChoices').hidden,false);
     manualUI.run('selectManualLyrics(1)');assert.equal(manualUI.$('changeLyrics').value,'Fixture candidate two lyric text');
-    assert.equal(manualUI.run('lyricChoice(editingResult)?.lyrics_id||null'),checked?'manual-two':null);
+    assert.equal(manualUI.run('lyricChoice(editingResult,true)?.lyrics_id||null'),'manual-two');
   }
   assert.equal(manualUI.calls.filter(c=>c.url.endsWith('/save')).length,0);
   manualUI.context.lyricResponse={status:'not_found',message:''};await manualUI.run('searchLyricsForCurrent()');
@@ -390,7 +390,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.$('folderSearch').value='';h.run('renderFolders()');assert(row(h,'Album/Disc1/Bonus'));
   const reloaded=harness();reloaded.run("musicFolders=['Album','Album/Disc1','Album/Disc1/Bonus'];renderFolders()");
   assert(row(reloaded,'Album/Disc1/Bonus'));
-  await h.run('loadPreferences()');assert.equal(h.$('recurse').checked,false);assert.equal(h.$('renameFiles').checked,true);
+  await h.run('loadPreferences()');assert.equal(h.$('recurse').checked,false);assert.equal(h.$('renameFiles').checked,false);
   assert.equal(h.$('artistPreference').value,'latin');
   const savedOptions=h.run('JSON.stringify(optionState())');const beforeModalCalls=h.calls.length;
   h.run('openSaveOptions()');assert.equal(h.$('saveOptionsDialog').open,true);
@@ -430,7 +430,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   h.$('onlyEmpty').checked=false;
   h.context.candidate={id:'latin',title:'Song',artist:'原文',artist_latin:'Latin',albumartist:'原文',album_artist_latin:'Latin'};
   h.run('applyCandidate(editingResult,candidate)');assert.equal(h.$('chg_artist').value,'Latin');assert.equal(h.$('chg_albumartist').value,'Latin');
-  const confirmedSave=h.run('saveCurrent()');h.run('resolveAction(true)');await confirmedSave;assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.rename,true);
+  const confirmedSave=h.run('saveCurrent()');h.run('resolveSaveConfirm(true)');await confirmedSave;assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.rename,false);
   assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.only_empty,false);assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.fill_lyrics,false);assert.equal(h.calls.filter(c=>c.url.endsWith('/save')).at(-1).body.cover_max_px,500);
   const snapshot=h.run('jobSignature(job)');h.context.job.results[0].search_generation='new-generation';
   assert.notEqual(h.run('jobSignature(job)'),snapshot);
@@ -461,14 +461,14 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
     {path:'long/<script>.mp3',status:'failed',message:'bad <tag>',warning:'warning',rename_error:'rename error'},
     {path:'part.mp3',status:'partial',rename_error:'name conflict'},
     {path:'skip.mp3',status:'skipped',reason:'no_selection'}]};
-  safety.run('reportSave(report)');assert.equal(safety.$('saveResultDialog').open,true);
-  assert.match(safety.$('saveResultCounts').innerHTML,/저장: 2/);
-  assert.match(safety.$('saveResultCounts').innerHTML,/일부 처리: 1/);
+  safety.run("reportSave(report,'selected',[],new Map())");assert.equal(safety.$('saveResultDialog').open,true);
+  assert.match(safety.$('saveResultCounts').innerHTML,/저장 성공/);
+  assert.match(safety.$('saveResultCounts').innerHTML,/일부 저장/);
   assert.match(safety.$('saveResultIssues').innerHTML,/&lt;script&gt;/);
   assert(!safety.$('saveResultIssues').innerHTML.includes('<script>'));
   assert.match(safety.$('saveResultIssues').innerHTML,/warning \/ rename error/);
   assert.equal(safety.$('saveResultState').textContent,'state error');
-  assert(html.includes('overflow-wrap:anywhere'));assert(html.includes('max-height:280px;overflow:auto'));
+  assert(html.includes('overflow-wrap:anywhere'));assert(html.includes('max-height:280px;overflow-y:auto'));
   safety.$('fileFilter').value='a.mp3';safety.run('applyFilter();persistView()');
   const reload=harness();reload.context.jobsResponse=[{id:'other',sub_path:'Other',results:[]},safety.context.job];
   await reload.run('pollJobs()');assert.equal(reload.$('subPath').value,'Album');
@@ -488,7 +488,7 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
     optionHarness.run('updateSavePreview();applyCandidate(editingResult,editingResult.candidates[0])');
     const pending=optionHarness.run('saveCurrent()');optionHarness.run('resolveAction(true)');await pending;
     const body=optionHarness.calls.filter(c=>c.url.endsWith('/save')).at(-1).body;
-    assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,enabled);
+    assert.equal(body.only_empty,enabled);assert.equal(body.fill_lyrics,enabled);assert.equal(body.rename,false);
     assert.equal(body.items[0].include_ids,enabled);assert.equal(body.cover_max_px,enabled?100:1000);
   }
   const batch=harness();batch.context.jobsResponse=[{id:'done',status:'done',results:[]},{id:'stopped',status:'cancelled',results:[]},{id:'busy',status:'scanning',results:[]}];

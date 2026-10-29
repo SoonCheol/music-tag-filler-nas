@@ -47,6 +47,7 @@ function adoptJob(job){
   currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old&&old.search_phase&&['waiting','running'].includes(old.search_phase)&&r.search_phase==='complete'&&!old._dirty&&old._selection==='none')old._draft=null;if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||k==='_displayOrder'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
   let nextOrder=currentResults.reduce((max,r)=>Math.max(max,r._displayOrder??-1),-1)+1;currentResults.forEach(r=>{if(r._displayOrder==null)r._displayOrder=nextOrder++;});
   if(typeof job.sub_path==='string'){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
+  $('searchMode').value=['integrated','itunes','musicbrainz','quick'].includes(job.options?.search_mode)?job.options.search_mode:'integrated';
   currentJobId=job.id;displayedJobId=job.id;lastJobSignature=jobSignature(job);editingResult=null;selectedFileIdx=-1;applyFilter();
   const index=filteredResults.findIndex(r=>r.path===selectedPath);if(index>=0)selectFile(index);persistView();
 }
@@ -133,7 +134,7 @@ async function startScan(force=false){
   const sub=$('subPath').value.trim();
   if(!sub&&!await confirmAction('전체 음악 스캔', '전체를 선택했습니다. 음악 파일이 약 8만 개이므로 전체 스캔에 매우 오랜 시간이 걸릴 수 있습니다.\n전체 스캔을 시작할까요?', '전체 스캔 시작'))return;
   if(sub!==$('subPath').value.trim())return;
-  const payload={sub_path:sub,paths:$('scanPaths').value.split('\n').map(p=>p.trim()).filter(Boolean),recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,country:$('searchCountry').value||null,use_fingerprint:$('useFingerprint').checked,force};
+  const payload={sub_path:sub,paths:$('scanPaths').value.split('\n').map(p=>p.trim()).filter(Boolean),recurse:$('recurse').checked,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,rename:$('renameFiles').checked,country:$('searchCountry').value||null,use_fingerprint:$('useFingerprint').checked,search_mode:$('searchMode').value||'integrated',force};
   stopMediaPrefetch();mediaJobStatus="scanning";const browserStart=performance.now();
   try{$('btnScan').disabled=true;const res=await api('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});currentJobId=res.job_id;scanBrowserTimes.set(currentJobId,{start:browserStart,base:0});persistView();pollJobs();}catch(e){if(e.status===409&&e.detail){alert(e.detail.message||'백그라운드 작업 목록에서 스캔을 중지해 주세요')}else alert(e.message)}finally{$('btnScan').disabled=false}
 }
@@ -263,6 +264,31 @@ async function requestSelectFile(idx){
   if(await allowDraftMove())selectFile(filteredResults.indexOf(r));
 }
 
+let fileNavigationPending=false;
+async function navigateFileList(event){
+  if(event.defaultPrevented||event.isComposing||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||!['ArrowUp','ArrowDown'].includes(event.key))return;
+  if(event.target.isContentEditable||event.target.closest('input,textarea,select,button,a,[contenteditable]'))return;
+  event.preventDefault();
+  if(fileNavigationPending||saving||searching||renameBusy||renameEditor||actionResolver||!filteredResults.length)return;
+  const current=filteredResults.indexOf(editingResult);
+  const index=current<0?0:Math.max(0,Math.min(filteredResults.length-1,current+(event.key==='ArrowDown'?1:-1)));
+  const row=filteredResults[index];
+  fileNavigationPending=true;
+  try{
+    await requestSelectFile(index);
+    if(editingResult!==row)return;
+    const scroller=$('fileListScroller'),node=fileRowNodes.get(row.path);
+    scroller.focus({preventScroll:true});
+    if(node){
+      const bounds=scroller.getBoundingClientRect(),rect=node.getBoundingClientRect();
+      const header=scroller.querySelector('thead');
+      const top=bounds.top+(header?header.getBoundingClientRect().height:0);
+      if(rect.top<top)scroller.scrollTop-=top-rect.top;
+      else if(rect.bottom>bounds.bottom)scroller.scrollTop+=rect.bottom-bounds.bottom;
+    }
+  }finally{fileNavigationPending=false;}
+}
+
 function renderFileList(){
   const numberWidth=Math.max(30,String(Math.max(1,currentResults.length)).length*8+16);$('fileColumn').style.setProperty('--number-width',numberWidth+'px');
   sanitizeChecks();const body=$('fileBody'),scroller=$('fileListScroller'),scrollTop=scroller.scrollTop,nodes=[],next=new Map();
@@ -312,6 +338,7 @@ function selectFile(idx){
   const best=r.candidates?.find(c=>c.id===r._candidateId);
   renderChangeCover(r);
   showLyricsStatus(r);
+  $('btnSearchBoth').hidden=!r.musicbrainz_skipped;
   if(!searching&&r.search_status)$('statusLine').textContent=searchSummary(r);
   renderCandidates(r);updateSavePreview();persistView();
   if(best&&!r._lyricsEdited)applySelectedLyrics(r,best);
@@ -320,21 +347,19 @@ function selectFile(idx){
 function searchSummary(r){
   const labels={matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};
   const errors=(r.search_errors||[]).map(e=>e.source+': '+e.message).join(' / ');
-  return (labels[r.search_status]||r.search_status||'대기 중')+(r.country?' ['+r.country+']':'')+(errors?' — '+errors:'');
+  return (labels[r.search_status]||r.search_status||'대기 중')+(r.country?' ['+r.country+']':'')+(r.musicbrainz_skipped?' — 빠른 검색에서 iTunes 결과가 충분해 MusicBrainz 생략':'')+(errors?' — '+errors:'');
 }
 
-async function manualSearch(){
+async function manualSearch(searchModeOverride=null){
   if(!editingResult)return alert('파일을 선택하세요');if(saving||searching)return;
   captureCurrent();const r=editingResult;let query=$('searchQ').value.trim(),country=$('searchCountry').value||null,mode='text';
   const prefix=query.match(/^@([a-z]{2})\s+/i);if(prefix){country=prefix[1].toUpperCase();query=query.slice(prefix[0].length).trim();}
   if(/^@sound(?:\s|$)/i.test(query)){mode='sound';query=query.replace(/^@sound\s*/i,'');}
-  const hadDraft=r._selection==='edit'||r._selection==='manual';const fields=[...r._fields];
+  const preserved={};for(const key of ['_candidateId','_selection','_draft','_fields','_manualFields','_lyricsSearch','_lyricsDraft','_lyricsEdited','_lyricsEpoch','_dirty','_draftRevision','_coverId','_checked','_appliedFields'])preserved[key]=r[key];
   searching=true;$('statusLine').textContent=mode==='sound'?'음향 지문 검색 중…':'재검색 중…';
   try{
-    const data=await api('/api/jobs/'+currentJobId+'/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:r.path,query,country,mode,use_fingerprint:mode==='sound',expected_revision:r._draftRevision||null})});
-    Object.assign(r,data);r._candidateFeedback=null;r._appliedFields=[];
-    if(hadDraft){if(!r.candidates.some(c=>c.id===r._candidateId)){r._candidateId=null;r._selection='edit';}}
-    else{r._draft=null;ensureDraft(r);r._fields=fields;}
+    const data=await api('/api/jobs/'+currentJobId+'/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:r.path,query,country,mode,search_mode:searchModeOverride||$('searchMode').value||'integrated',preserve_candidate_id:r._candidateId||null,use_fingerprint:mode==='sound',expected_revision:r._draftRevision||null})});
+    Object.assign(r,data);Object.entries(preserved).forEach(([key,value])=>{if(value!==undefined)r[key]=value;});r._candidateFeedback=null;
     editingResult=null;selectFile(filteredResults.indexOf(r));$('statusLine').textContent=searchSummary(r);
   }catch(e){alert('재검색 실패: '+e.message);}finally{searching=false;updateSavePreview();}
 }

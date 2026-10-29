@@ -218,6 +218,14 @@ try {
         $compose = "docker compose -p $container -f '$snapshotPath'"
     }
 
+    if ($doRedeploy) {
+        $rollbackImage = "$(($image -split ':')[0]):rollback-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+        Invoke-Nas "docker image tag '$($before.Image)' '$rollbackImage'"
+        $rollbackId = (Invoke-Nas "docker image inspect '$rollbackImage' --format '{{.Id}}'" | Out-String).Trim()
+        Assert-Same $before.Image $rollbackId 'rollback image ID'
+        Write-Host "Rollback image preserved: $rollbackImage ($rollbackId)"
+    }
+
     $changed = @()
     foreach ($file in $files) {
         $localHash = Get-LocalHash (Join-Path $projectRoot $file)

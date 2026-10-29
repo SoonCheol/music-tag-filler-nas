@@ -394,8 +394,8 @@ def lookup_lyrics(job_id, path, revision, title, artist, duration, candidate=Non
     return _lyrics_service.lookup_lyrics(job_id, path, revision, title, artist, duration, candidate, force, manual=manual)
 
 
-def selected_lyrics(job_id, path, revision, lyrics_id, title, artist):
-    return _lyrics_service.selected_lyrics(job_id, path, revision, lyrics_id, title, artist)
+def selected_lyrics(job_id, path, revision, lyrics_id, title, artist, approve_manual_mismatch=False):
+    return _lyrics_service.selected_lyrics(job_id, path, revision, lyrics_id, title, artist, approve_manual_mismatch)
 
 
 @app.get("/api/capabilities")
@@ -475,12 +475,18 @@ def research_file(job_id: str, request: SearchRequest):
             raise HTTPException(409, "파일이 변경되었습니다. 다시 스캔하세요")
         generation = uuid.uuid4().hex
         result["search_generation"] = generation
+        preserved_candidate = next((candidate for candidate in result.get("candidates", [])
+                                    if candidate_id(candidate) == request.preserve_candidate_id), None)
     artist, title = parse_filename(path)
     query = request.query.strip() or original_match.build_query(original.get("title") or title, original.get("artist") or artist)
     found = search_service.search(path, query, request.country, original["duration"], DATA_ROOT,
                                   mode=request.mode, use_fingerprint=request.use_fingerprint, force=True,
                                   previous=result.get("candidates") if request.mode == "sound" else None,
+                                  search_mode=request.search_mode,
                                   on_wait=lambda seconds: result.update(search_wait_seconds=seconds))
+    if preserved_candidate and not any(candidate_id(candidate) == request.preserve_candidate_id
+                                       for candidate in found.get("candidates", [])):
+        found["candidates"].append(preserved_candidate)
     timing = found.pop("_timing", {})
     with storage.OPERATION_LOCK:
         if result.get("search_generation") != generation or storage.revision(path) != original["revision"]:
@@ -538,7 +544,7 @@ def save_one(result, item, request, lyric_context=None):
     if storage.revision(path) != item.expected_revision:
         raise storage.StorageError("확인 이후 파일이 변경되었습니다. 다시 스캔하세요")
     if item.selection == "none":
-        if not item.cover_id and not request.rename and not (request.save_lyrics and item.lyrics_id):
+        if not item.cover_id and not request.rename and not (request.save_lyrics and (item.lyrics_id or item.lyrics_text)):
             return {"path": item.path, "status": "skipped", "reason": "no_selection"}
         # Explicit cover/rename-only operation must not import unchecked text or IDs.
         item = item.model_copy(update={"fields": [], "values": {}, "include_ids": False, "include_cover": False})
@@ -573,6 +579,8 @@ def save_one(result, item, request, lyric_context=None):
         if not only_empty or not final[key]:
             final[key] = values.get(field, "")
     needs_text = original_tags.Tags.from_dict(final) != current.tags
+    original_values = current.tags.as_dict()
+    requested_fields = [field for field in item.fields if final[storage.FIELDS[field]] != original_values[storage.FIELDS[field]]]
     ids = None
     if item.include_ids and candidate:
         model = search_service.candidate_model(candidate)
@@ -594,16 +602,14 @@ def save_one(result, item, request, lyric_context=None):
     if uploaded is not None:
         wants_cover = not (only_empty and current.cover is not None)
     has_real_lyrics = bool(current.synced or (current.lyrics.strip() and (only_empty or not original_lyrics.marker_only(current.lyrics))))
-    choice = selected_lyrics(result.get("job_id", ""), item.path, item.expected_revision, item.lyrics_id, final["title"], final["artist"]) if request.save_lyrics and item.lyrics_id else None
-    # New UI sends an explicit checkbox: only previously searched lyrics may save.
+    choice = selected_lyrics(result.get("job_id", ""), item.path, item.expected_revision, item.lyrics_id, final["title"], final["artist"], item.approve_manual_lyrics_mismatch) if request.save_lyrics and item.lyrics_id else None
+    edited_lyrics = original_lyrics.clean_text(item.lyrics_text) if request.save_lyrics and item.lyrics_text is not None else None
+    # New UI explicitly requests searched or directly entered lyrics.
     # Old API clients without that control retain their automatic missing-lyrics option.
-    wants_lyrics = bool("save_lyrics" not in request.model_fields_set and request.save_lyrics and item.selection != "none" and request.fill_lyrics and not choice and not has_real_lyrics and final["title"] and final["artist"])
+    wants_lyrics = bool("save_lyrics" not in request.model_fields_set and request.save_lyrics and item.selection != "none" and request.fill_lyrics and edited_lyrics is None and not choice and not has_real_lyrics and final["title"] and final["artist"])
     if choice and choice.get("candidate_id") and choice["candidate_id"] != item.candidate_id:
         raise storage.StorageError("가사 후보가 변경되었습니다. 다시 검색하세요")
-    if item.lyrics_text is not None and not choice:
-        raise storage.StorageError("편집 가사에는 유효한 검색 결과가 필요합니다")
-    edited_lyrics = original_lyrics.clean_text(item.lyrics_text) if item.lyrics_text is not None else None
-    manual_lyrics = (edited_lyrics if edited_lyrics is not None else choice["lyrics"]) if choice and choice["status"] == "found" and not (only_empty and has_real_lyrics) else None
+    manual_lyrics = (edited_lyrics if edited_lyrics is not None else choice["lyrics"] if choice and choice["status"] == "found" else None) if not (only_empty and has_real_lyrics) else None
     if needs_text or wants_cover or wants_lyrics or manual_lyrics or request.rename or (ids and not ids.is_empty()):
         storage.writable(path)  # fail before network lookups or backup creation on /music:ro
     cover = None
@@ -616,7 +622,7 @@ def save_one(result, item, request, lyric_context=None):
         # Normalize missing/empty downloads before reaching the transactional writer.
         cover = storage.prepare_cover_change(cover, current.cover, request.cover_max_px if request.cover_max_px is not None else preferences.read(DATA_ROOT).cover_max_px)
     lyrics = manual_lyrics
-    lyrics_status = choice["status"] if choice else "preserved" if has_real_lyrics else "skipped"
+    lyrics_status = "found" if manual_lyrics else choice["status"] if choice else "preserved" if has_real_lyrics else "skipped"
     if wants_lyrics:
         found, actually_searched = _lyrics_service.legacy_lookup(final["title"], final["artist"], current.length, lyric_context)
         lyrics_status = found.status
@@ -624,12 +630,35 @@ def save_one(result, item, request, lyric_context=None):
             lyrics = found.text
         choice = remember_lyrics((str(MUSIC_ROOT.resolve()), result.get("job_id", ""), item.path, item.expected_revision, final["title"], final["artist"]), found, actually_searched)
     synced = choice.get("synced") if choice and choice["status"] == "found" and request.save_lyrics and not (only_empty and (has_real_lyrics or current.synced)) else None
-    if edited_lyrics is not None and choice and edited_lyrics != choice["lyrics"]:
+    if edited_lyrics is not None and (not choice or edited_lyrics != choice["lyrics"]):
         synced = None  # Edited plain lyrics have no verified timestamps; preserve existing SYLT/LRC.
+    requested_assets = []
+    if cover is not None:
+        requested_assets.append("cover")
+    if manual_lyrics:
+        requested_assets.append("lyrics")
+    if synced and request.save_synced:
+        requested_assets.append("synced")
+    if synced and request.create_lrc:
+        requested_assets.append("lrc")
     outcome = storage.save(path, MUSIC_ROOT.resolve(), BACKUP_ROOT, values, item.fields,
-                           only_empty, item.expected_revision, cover, lyrics, request.rename, ids, replace_lyrics=bool(manual_lyrics),
+                           only_empty, item.expected_revision, cover, lyrics, False, ids, replace_lyrics=bool(manual_lyrics),
                            synced=synced if request.save_synced else None, lrc=synced if request.create_lrc else None,
                            asset_root=DATA_ROOT, rename_context=(jobs, save_jobs, result.get("job_id", "")))
+    actual = outcome.get("original") or {}
+    outcome["saved_fields"] = [field for field in requested_fields
+                                if actual.get({"title": "title", "artist": "artist", "album": "album",
+                                               "albumartist": "albumartist", "year": "date",
+                                               "track": "tracknumber", "genre": "genre"}[field]) == final[storage.FIELDS[field]]
+                                and outcome.get("status") in ("saved", "partial")]
+    outcome["failed_fields"] = [field for field in requested_fields if field not in outcome["saved_fields"]]
+    saved_assets = list(requested_assets) if outcome.get("status") in ("saved", "partial") and outcome.get("music_saved") else []
+    if asset_errors:
+        saved_assets = [asset for asset in saved_assets if asset != "cover"]
+    if any(error.get("stage", "").startswith("LRC") for error in outcome.get("postprocess_errors", [])):
+        saved_assets = [asset for asset in saved_assets if asset != "lrc"]
+    outcome["saved_assets"] = saved_assets
+    outcome["failed_assets"] = [asset for asset in requested_assets if asset not in saved_assets]
     try:
         if choice:
             outcome["lyrics_search"] = lyric_response(choice)
@@ -725,7 +754,11 @@ def save_job(job_id: str, request: SaveRequest):
 
 
 def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
+    lock_started = time.perf_counter()
     with storage.OPERATION_LOCK:
+        logging.getLogger("uvicorn.error").info("save_timing %s", json.dumps({
+            "task_id": task_id, "phase": "lock_wait", "seconds": round(time.perf_counter() - lock_started, 6),
+            "thread": threading.get_ident()}))
         try:
             rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
         except storage.StorageError as exc:
@@ -761,7 +794,13 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
             try:
                 rename_service.check_ready(DATA_ROOT, MUSIC_ROOT)
                 result["job_id"] = job_id
-                outcome = save_one(result, items[relative], request, lyric_context)
+                save_started = time.perf_counter()
+                try:
+                    outcome = save_one(result, items[relative], request, lyric_context)
+                finally:
+                    logging.getLogger("uvicorn.error").info("save_timing %s", json.dumps({
+                        "task_id": task_id, "phase": "file_save", "seconds": round(time.perf_counter() - save_started, 6),
+                        "thread": threading.get_ident()}))
                 outcome["request_path"] = relative
                 outcome.setdefault("path", relative)
                 if outcome.get("original"):
@@ -801,10 +840,15 @@ def perform_save_job(job_id: str, request: SaveRequest, task_id: str):
                     "unselected": sum(o.get("reason") == "no_selection" for o in outcomes),
                     "results": outcomes,
                     "errors": [o for o in outcomes if o["status"] in ("failed", "partial")]}
+        record_started = time.perf_counter()
         try:
-            save_jobs()
+            save_jobs(job_id)
         except Exception as exc:
             response["state_error"] = "파일 처리 결과는 위와 같으나 작업 상태 기록 실패: " + str(exc)
+        finally:
+            logging.getLogger("uvicorn.error").info("save_timing %s", json.dumps({
+                "task_id": task_id, "phase": "job_record", "seconds": round(time.perf_counter() - record_started, 6),
+                "thread": threading.get_ident()}))
         return response
 
 

@@ -70,6 +70,10 @@ let candidateCoverRunning=0,candidateCoverAttempt=0,candidateListGeneration=0;
 let mediaJobStatus=null,mediaPrefetchTimer=null;
 
 $('fileListScroller').addEventListener('scroll',scheduleMediaPrefetch);
+$('fileListScroller').addEventListener('mousedown',event=>{
+  if(!event.target.closest('input,textarea,select,button,a,[contenteditable]'))$('fileListScroller').focus({preventScroll:true});
+});
+$('fileListScroller').addEventListener('keydown',navigateFileList);
 
 let hoverCoverToken=0,hoverCoverTarget=null,hoverCoverFailed=false;
 
@@ -83,9 +87,9 @@ $('saveLyrics').addEventListener('change',()=>{if(!$('saveLyrics').disabled)comm
 const storedLyricsCache=new Map();
 
 $('changeLyrics').addEventListener('input',()=>{
-  const r=editingResult;if(!r||$('changeLyrics').readOnly)return;
+  const r=editingResult;if(!r)return;
   r._lyricsEdited=true;r._dirty=true;r._lyricsEpoch=(r._lyricsEpoch||0)+1;
-  r._lyricsSearch={...r._lyricsSearch,lyrics:$('changeLyrics').value,synced:''};updateSavePreview();
+  r._lyricsDraft=$('changeLyrics').value;updateSavePreview();
 });
 
 const fieldLabels={title:'제목',artist:'가수',album:'앨범',albumartist:'앨범 가수',track:'트랙',year:'년도',genre:'장르'};

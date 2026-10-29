@@ -170,17 +170,18 @@ class SaveCompletionTests(unittest.TestCase):
         with self.assertRaises(storage.StorageError):
             ren.check_ready(self.data)
 
-    def test_rename_jobs_failure_restart_does_not_repeat_music_move(self):
+    def test_save_jobs_failure_restart_keeps_original_filename(self):
         path = self._prepare()
         request = self._request(path, rename=True)
         with patch.object(main, 'save_jobs', side_effect=OSError('injected path persistence')):
             response = main.save_job('test', request)
-        self.assertEqual((response['saved'], response['failed'], response['partial']), (1, 0, 1))
+        self.assertEqual((response['saved'], response['failed'], response['partial']), (1, 0, 0))
         outcome = response['results'][0]
         actual = self.root / outcome['path']
-        self.assertFalse(path.exists())
+        self.assertTrue(path.exists())
+        self.assertEqual(actual, path)
         self.assertTrue(actual.is_file())
-        self.assertTrue(outcome['recovery_pending'])
+        self.assertFalse(outcome.get('recovery_pending', False))
         snapshot = actual.read_bytes(), actual.stat().st_mtime_ns
         main.jobs.clear()
         main.jobs.update(job_store.load(self.data))

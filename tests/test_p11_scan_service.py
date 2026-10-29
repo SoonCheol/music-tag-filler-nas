@@ -63,7 +63,8 @@ class ScanServiceTests(unittest.TestCase):
         path = self.copy()
         before = (path.read_bytes(), path.stat().st_mtime_ns)
         background = BackgroundTasks()
-        job_id = main.start_scan(main.ScanRequest(paths=[path.name]), background)["job_id"]
+        job_id = main.start_scan(main.ScanRequest(paths=[path.name], search_mode="quick"), background)["job_id"]
+        self.assertEqual(main.jobs[job_id]["options"]["search_mode"], "quick")
         self.assertEqual(main.jobs[job_id]["status"], "queued")
         self.assertIs(background.tasks[0].func, main.scan_job)
         self.assertFalse(background.tasks[0].args[-1])
@@ -76,9 +77,12 @@ class ScanServiceTests(unittest.TestCase):
         self.assertEqual(main.resume_job(job_id, resumed), {"status": "resumed", "id": job_id})
         self.assertIs(resumed.tasks[0].func, main.scan_job)
         self.assertTrue(resumed.tasks[0].args[-1])
+        self.assertEqual(resumed.tasks[0].args[2]["search_mode"], "quick")
         self.assertFalse(main.jobs[job_id]["cancel_requested"])
-        with patch.object(search_service, "search", return_value={"candidates": [], "search_status": "not_found"}):
+        with patch.object(search_service, "search", return_value={"candidates": [], "search_status": "not_found"}) as search:
             asyncio.run(resumed())
+        search.assert_called_once()
+        self.assertEqual(search.call_args.kwargs["search_mode"], "quick")
         job = main.jobs[job_id]
         self.assertEqual((job["status"], job["scanned"], job["total"]), ("done", 1, 1))
         self.assertEqual(json.loads((self.data / "jobs" / (job_id + ".json")).read_text()), job)
@@ -95,6 +99,12 @@ class ScanServiceTests(unittest.TestCase):
         counts = {"running": 0, "peak": 0, "calls": 0}
         snapshots = []
         original_save = main.save_jobs
+        original_describe = storage.describe
+        read_paths = []
+
+        def describe(path):
+            read_paths.append(path)
+            return original_describe(path)
 
         def persist(job_id=None):
             self.assertTrue(storage.OPERATION_LOCK._is_owned())
@@ -116,11 +126,12 @@ class ScanServiceTests(unittest.TestCase):
                 with guard:
                     counts["running"] -= 1
 
-        with patch.object(search_service, "search", side_effect=search), patch.object(main, "save_jobs", side_effect=persist):
+        with patch.object(search_service, "search", side_effect=search), patch.object(main, "save_jobs", side_effect=persist), patch.object(storage, "describe", side_effect=describe):
             worker = threading.Thread(target=main.scan_job, args=("test", "", {}))
             worker.start()
             try:
                 self.assertTrue(entered.wait(5))
+                self.assertEqual(len(read_paths), 3, "do not read the whole folder before searching")
                 acquired = storage.OPERATION_LOCK.acquire(timeout=.5)
                 self.assertTrue(acquired, "network search must not hold the operation lock")
                 if acquired:

@@ -128,10 +128,15 @@ class LyricsService:
             return self.remember_lyrics(key, found, bool(title.strip() and artist.strip()), candidate_key, manual=manual)
 
 
-    def selected_lyrics(self, job_id, path, revision, lyrics_id, title, artist):
+    def selected_lyrics(self, job_id, path, revision, lyrics_id, title, artist, approve_manual_mismatch=False):
         with self._lyrics_lock:
             entry = self._lyrics_tokens.get(lyrics_id)
-            if not entry or entry["expires"] <= time.monotonic() or entry["key"] != (str(self.music_root().resolve()), job_id, path, revision, title, artist):
+            if not entry or entry["expires"] <= time.monotonic():
+                raise storage.StorageError("가사 검색 결과가 만료되었거나 태그가 변경되었습니다. 다시 검색하세요")
+            key = entry["key"]
+            same_file = key[:4] == (str(self.music_root().resolve()), job_id, path, revision)
+            same_tags = key[4:] == (title, artist)
+            if not same_file or not (same_tags or (approve_manual_mismatch and entry.get("manual", False))):
                 raise storage.StorageError("가사 검색 결과가 만료되었거나 태그가 변경되었습니다. 다시 검색하세요")
             self._lyrics_tokens.move_to_end(lyrics_id)
             return entry

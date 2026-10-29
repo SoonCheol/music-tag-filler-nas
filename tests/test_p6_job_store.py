@@ -43,6 +43,39 @@ class JobStoreTests(unittest.TestCase):
   loaded=job_store.load(self.data);self.assertEqual(loaded['running']['status'],'interrupted')
   summary=main.list_jobs(summary=True);self.assertNotIn('results',summary[0]);self.assertNotIn('options',summary[0])
 
+ def test_changed_record_has_one_durable_directory_publication(self):
+  jobs={'j':{'id':'j','status':'done','results':[]}}
+  job_store.save(self.data,jobs);jobs['j']['scanned']=1
+  sync=job_store.rename_service.sync_dir
+  with patch.object(job_store.rename_service,'sync_dir',wraps=sync) as calls:
+   job_store.save(self.data,jobs,['j'])
+  self.assertEqual([call.args[0] for call in calls.call_args_list].count(self.data/'jobs'),1)
+  self.assertEqual(json.loads((self.data/'jobs/j.json').read_bytes())['scanned'],1)
+
+ def test_directory_sync_failure_propagates_and_retry_is_durable(self):
+  jobs={'j':{'id':'j','status':'done','results':[]}}
+  job_store.save(self.data,jobs);jobs['j']['scanned']=2
+  with patch.object(storage,'_sync_dir',side_effect=OSError('injected directory sync')):
+   with self.assertRaisesRegex(OSError,'directory sync'):job_store.save(self.data,jobs,['j'])
+  with patch.object(storage,'_replace_file',wraps=storage._replace_file) as writes:
+   job_store.save(self.data,jobs,['j'])
+  self.assertEqual(writes.call_count,1)
+  self.assertEqual(job_store.load(self.data)['j']['scanned'],2)
+
+ def test_current_lyric_save_does_not_serialize_unrelated_job(self):
+  row=self.job([self.copy()])[0]
+  main.jobs['other']={'id':'other','status':'done','results':[]};main.save_jobs('other')
+  other=self.data/'jobs/other.json';before=other.read_bytes(),other.stat().st_mtime_ns
+  main.jobs['other']['not_for_this_save']=object()
+  item=self.item(row,selection='none',fields=[],values={},lyrics_text='Generated direct lyric')
+  with self.assertLogs('uvicorn.error',level='INFO') as log:
+   response=self.http(self.request([item],save_lyrics=True))
+  self.assertEqual(response['saved'],1,response);self.assertNotIn('state_error',response)
+  self.assertEqual((other.read_bytes(),other.stat().st_mtime_ns),before)
+  phases=[json.loads(line.split('save_timing ',1)[1])['phase'] for line in log.output if 'save_timing ' in line]
+  self.assertEqual(phases,['lock_wait','file_save','job_record'])
+  self.assertNotIn('Generated direct lyric','\n'.join(log.output))
+
  def test_summary_does_not_rank_candidates(self):
   self.job([self.copy()]);main.jobs['test']['results'][0].pop('ranking_version',None)
   with patch.object(main,'prepare_result',side_effect=AssertionError('must not rank for summaries')):self.assertEqual(len(main.list_jobs(summary=True)),1)

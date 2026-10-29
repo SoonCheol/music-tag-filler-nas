@@ -372,13 +372,11 @@ class AutoRenameTests(unittest.TestCase):
 
         with patch.object(ren, "no_replace", side_effect=collide), patch.object(main, "save_one", wraps=main.save_one) as save:
             outcome = main.save_job("test", request)
-        self.assertEqual(save.call_count, 1)
-        self.assertEqual(len(collisions), 1)
-        self.assertEqual(collisions[0].read_bytes(), b"external backup")
-        self.assertEqual((outcome["saved"], outcome["partial"], outcome["failed"]), (1, 1, 1))
-        self.assertEqual(second.read_bytes(), before)
-        self.assertFalse(Path(tags.backup_path(str(second))).exists())
-        self._rename_record("pending")
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(collisions, [])
+        self.assertEqual((outcome["saved"], outcome["partial"], outcome["failed"]), (2, 0, 0))
+        self.assertNotEqual(second.read_bytes(), before)
+        self.assertTrue(Path(tags.backup_path(str(second))).exists())
 
     def test_queued_save_rechecks_block_after_acquiring_lock(self):
         path = self._prepare()
@@ -423,13 +421,13 @@ class AutoRenameTests(unittest.TestCase):
         outcome = main.save_job("test", main.SaveRequest(**self.request([self.item(row)], rename=True)))
         self.assertEqual(outcome["saved"], 1)
         relative = outcome["results"][0]["path"]
-        self.assertEqual(main.jobs["related"]["results"][0]["path"], relative)
-        self.assertEqual(main.jobs["related"]["options"]["paths"], [relative])
-        record = self._rename_record("complete")[1]
-        self.assertEqual(record["old_path"], path.name)
-        self.assertEqual(record["backup_id"], old_folder.name)
+        self.assertEqual(relative, path.name)
+        self.assertEqual(main.jobs["related"]["results"][0]["path"], path.name)
+        self.assertEqual(main.jobs["related"]["options"]["paths"], [path.name])
+        self.assertFalse((self.data / "renames").exists())
+        self.assertEqual(storage._verify_backup(path, self.root, self.backups)[0].name, old_folder.name)
         self._assert_jobs(relative, relative)
-        self._restore(self.root / relative)
+        self._restore(path)
 
 
 if __name__ == "__main__":

@@ -233,12 +233,9 @@ class P2Tests(unittest.TestCase):
         result = self.job([path])[0]
         item = self.item(result, selection="none", values={"title": "Must not write"}, fields=["title"])
         response = self.http(self.request([item], rename=True))
-        self.assertEqual(response["saved"], 1)
-        relative = response["results"][0]["path"]
-        renamed = self.root / relative
-        self.assertEqual(p0.tags.read_file(str(renamed)).tags.title, "Original song")
-        self.http({"expected_revision": storage.revision(renamed)}, "/api/revert/" + urllib.parse.quote(relative))
-        self.assertEqual(renamed.read_bytes(), before)
+        self.assertEqual(response["skipped"], 1)
+        self.assertEqual(response["results"][0]["path"], path.name)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_uploaded_cover_subset_save_no_implicit_writes_and_undo(self):
         first, second = self.copy("one.mp3", blank=True), self.copy("two.mp3", blank=True)

@@ -14,7 +14,7 @@
 | 프로그램 data | `/volume3/docker3/music-tag-filler-v6/data` → `/data:rw` |
 | 스택·Compose 프로젝트·서비스·컨테이너 | 모두 `music-tag-filler` |
 | 이미지 | `music-tag-filler-nas:v2.0.0` |
-| 이미지 ID | `sha256:f14f7ed3b893b878ace0e2d98aa62e2c42974809e86bf15d7583de916b13aa2d` |
+| 이미지 ID | `sha256:f81cd0bef166997c1913fd5755ce85bdd4f0cb5d1d4191621389d106f144e7a1` |
 | 웹·포트 | `http://192.168.0.100:8000/`, `8000:8000/tcp` |
 | Portainer | `http://192.168.0.100:9001`, 컨테이너 `portainer` |
 | 스택 ID / 환경 ID | `32` / `7` |
@@ -271,3 +271,51 @@ running/재시작0이었다. 당시 배포본에 `music-tag-filler-nas:rollback-
 배포 전후 /data 622개 파일(960,745,425 bytes)의 상대 이름+내용 집계 SHA-256은
 `ca028431097b83dfb36b46308af8624dcc26f39e20c32f923b15d63d43393201`로 동일하다.
 운영 음악 저장·이름 변경·복원·스캔 및 GitHub push는 실행하지 않았다.
+
+## #023-v2 저장 확인창·수동 가사 승인·파일명 자동 변경 비활성화 배포 — 2026-10-28
+
+현재곡 저장 전/후와 선택곡 저장 전/후 창을 기존 저장 흐름에 연결했다. 현재곡은 실제 저장 계획의 태그별 포함/제외와 검색어 불일치를 확인하며, 확인 승인 후에도 사용자가 입력한 제목·가수는 그대로 저장된다. 선택곡은 공통 옵션과 예상치를 표시하고 서버 결과의 성공·일부 저장·실패·변경 없음을 집계한다. 파일명 변경 옵션과 저장 요청 경로는 비활성화했으며, 직접 파일명 변경·복구 구현은 보존했다.
+
+최종 빌드 이미지에서 Linux Python 회귀 193개 통과, 기존 예상 실패 1개. Node UI 검사 3종, 저장소 준비·Git ignore 검사, PowerShell 배포 설정 검사 통과. 운영 음악 및 `/data`는 테스트 컨테이너에 마운트하지 않았다.
+
+배포 전 현재 실행 이미지 `sha256:f14f7ed3b893b878ace0e2d98aa62e2c42974809e86bf15d7583de916b13aa2d`를 `music-tag-filler-nas:rollback-023-v2-20261028`로 보존했다. 소스 백업은 `deploy-backups/20261028-024233-d9d2894d`다. 기존 `deploy-nas.ps1`로 Portainer stack 32의 `music-tag-filler`만 재생성했다. 포트·마운트·환경·기본 설정 일치 및 running/재시작0을 확인했다.
+
+새 실행 이미지 ID는 `sha256:a4a09eae6070c26ab283826735172600299ba07d67ebab3029b0a5e7ab8918e0`이다. 배포 후 HTTP 200, `/api/folders` 200(3,481개), 수정된 저장 UI 및 JavaScript 자산 HTTP 200을 확인했다. 배포 전후 `/data` 627개 파일(972,847,921 bytes)의 상대 경로+내용 집계 SHA-256 `2cbf435e2618e451f61ee3a2e7c5836199d7028bab6a75cf54887712d9c3dc62`가 동일하다.
+
+사용자 요청에 따라 Chrome·Codex 내장 브라우저의 시각 검증과 화면 캡처는 생략했다. 운영 음악 저장·이름 변경·복원·스캔과 GitHub push는 실행하지 않았다.
+
+## #023-v2 저장 확인창 최초 표시 오류 수정 배포 — 2026-10-28
+
+원인: `.save-dialog` 기본 CSS의 `display:flex`가 닫힌 `<dialog>`의 브라우저 기본 숨김을 덮어써 페이지 로딩 직후 빈 확인창을 표시했다. 기본 규칙에서 `display`만 제거해 닫힌 상태는 기본적으로 숨기고, `[open]`일 때 기존 flex 레이아웃을 유지했다. 저장 UI 검사와 CSS 초기/열림 상태 검사를 통과했다.
+
+기존 `deploy-nas.ps1`로 Portainer stack 32의 `music-tag-filler`만 재생성했다. 배포 전 #023-v2 이미지 `sha256:a4a09eae6070c26ab283826735172600299ba07d67ebab3029b0a5e7ab8918e0`를 `music-tag-filler-nas:rollback-023-v2-fix-20261028`로 보존했다. 소스 백업은 `deploy-backups/20261028-025153-41541fd5`다. 현재 이미지 ID는 상단 표를 따른다.
+
+컨테이너 running/재시작0, Portainer/Compose 이름·포트·볼륨·환경 유지, 웹 HTTP 200 및 `/api/folders` HTTP 200(3,481개)을 확인했다. `/data` 627개 파일(972,847,921 bytes)의 배포 전후 집계 SHA-256 `2cbf435e2618e451f61ee3a2e7c5836199d7028bab6a75cf54887712d9c3dc62`가 동일하다. 브라우저 시각 검증은 생략했다. 운영 음악 파일 작업과 GitHub push는 하지 않았다.
+
+## #024 가사 직접 입력·붙여넣기 및 저장 수정 — 2026-10-28
+
+검색 토큰 없이 가사를 입력·붙여넣을 수 있고 검색 가사도 수정할 수 있다. 직접 입력한 본문을 검색 상태와 별도의 초안으로 보존하고 기존 `lyrics_text` 저장 요청으로 전달한다. 가사 저장 체크 해제·기존 가사 보호·빈 입력 시 본문을 보존하면서 저장 제외 이유를 표시한다. 자동 검색·후보 검증·태그 입력 흐름은 유지한다.
+
+Node 저장 UI 검사와 격리 Linux 관련 검사 6개를 통과했다. 운영 마운트 없는 컨테이너의 임시 MP3·FLAC·M4A·OGG를 실제 HTTP 저장 API로 저장해 가사 본문, 다른 태그·커버·식별자·동기화 가사 보존, 정확한 원본 바이트 복원을 확인했다. 체크 해제·기존 가사 보호·빈 입력·오래된 리비전 및 기존 검색 토큰 보호도 확인했다. 전체 회귀와 브라우저 자동화는 실행하지 않았다.
+
+`deploy-nas.ps1`의 CheckOnly/PreflightOnly 후 별도 validate-024 이미지를 검사하고 동일 이미지 ID를 운영 태그로 배포했다. 이전 이미지 `sha256:6d95075f350090fe315d2e2f9961c865b259cfc02b7279e8c7d0ec4e37046ebc`는 `music-tag-filler-nas:rollback-024-20261028`로 보존했다. 소스 백업은 `deploy-backups/20261028-030107-74397265`다.
+
+현재 이미지 ID는 상단 표를 따른다. stack 32의 기존 이름·포트·볼륨·설정 일치, running/재시작0, 웹 및 폴더 API HTTP 200(3,481개)을 확인했다. 배포 전후 `/data` 627개 파일(972,848,496 bytes)의 집계 SHA-256 `4d0ad61685326d4b19a3d37968770af41c374b4c7a6f13b089ea7167fa493244`가 동일하다. 운영 음악 수정 및 GitHub push는 하지 않았다. 실제 브라우저 화면 확인은 미실행이다.
+
+## #024 입력 잠금 후속 수정 — 2026-10-28
+
+사용자가 #024 배포 후에도 입력·붙여넣기 불가를 보고했다. 실제 NAS HTTP 응답은 #024 코드였지만 HTML textarea의 초기 `readonly`와 `renderLyricsPanels()`의 `!r || !r.original?.revision || saving` 읽기 전용 잠금이 남아 있었다. 해당 HTML 속성을 제거하고 렌더의 `readOnly`를 false로 고정했으며 입력 핸들러의 readOnly 거부 조건도 제거했다. 저장 체크·기존 가사 보호·파일 리비전 검사는 저장 경로에 유지한다. 입력창에 disabled나 pointer-events 차단은 없었다. JavaScript URL에 `v=024-input2`를 추가해 이전 자산과 구분한다. 사용자 브라우저에서 활성화된 잠금 조건과 캐시 적중 여부는 직접 확인하지 않았다.
+
+관련 입력 잠금 검사·문법 검사 및 CheckOnly/PreflightOnly를 거쳐 기존 스크립트로 배포했다. 이전 이미지는 `music-tag-filler-nas:rollback-024-input2-20261028`, 소스 백업은 `deploy-backups/20261028-030947-300b9b7d`에 보존했다. 배포 후 실제 HTTP HTML/가사 JS/app JS가 로컬 수정본과 완전히 일치하며 textarea에 readonly/disabled가 없음을 확인했다. 현재 이미지는 상단 표를 따른다. 컨테이너 running/재시작0, 기존 stack 32 설정 유지 및 웹·폴더 API 응답 검사를 통과했다.
+
+배포 전후 `/data` 627개 파일(972,848,496 bytes)의 집계 SHA-256은 `4d0ad61685326d4b19a3d37968770af41c374b4c7a6f13b089ea7167fa493244`로 동일하다. 운영 음악 수정·전체 회귀·브라우저 자동화·GitHub push는 하지 않았다. 실제 브라우저에서 타이핑/붙여넣기 동작을 확인했다고 간주하지 않는다.
+
+## #025 음악 검색 방식 선택 배포 — 2026-10-29
+
+스캔 설정에 통합 검색(기본), iTunes만, MusicBrainz만, 빠른 검색을 추가했다. 빠른 검색은 기존 자동 선택이 통과하지 못하면 MusicBrainz를 추가하며, iTunes 후보가 하나뿐인 경우에도 자동 선택 기준을 통과하지 않으면 생략하지 않는다. MusicBrainz를 건너뛴 결과에는 이유를 표시하고 두 곳 모두 재검색할 수 있다. 작업 옵션은 이어하기에 유지된다.
+
+관련 격리 테스트 4개, 재검색 초안 보존 UI 검사, JavaScript 문법 검사, 배포 설정 검사, CheckOnly 및 NAS PreflightOnly를 통과했다. 전체 회귀와 브라우저 자동화, 실제 음악 저장·복원·스캔은 하지 않았다. 배포 뒤 웹 화면에서 기본 선택과 네 가지 선택지를 확인했다.
+
+변경 전 이미지 `sha256:ded449b8c86a3fd3889c543de150ddff418c3281d1dbaf281b887bcc289852a7`를 `music-tag-filler-nas:rollback-20261028-163057-0ccba0f2`로 보존했다. 소스 백업은 `deploy-backups/20261028-163106-fbda4aa3`다. 기존 deploy-nas.ps1로 Portainer stack 32의 `music-tag-filler`만 재생성했다. 배포 완료 시 running 상태, 기존 마운트·포트·환경 설정, HTTP 및 폴더 API 검증이 통과했다.
+
+새 이미지 ID는 `sha256:f81cd0bef166997c1913fd5755ce85bdd4f0cb5d1d4191621389d106f144e7a1`이다. GitHub push는 하지 않았다.

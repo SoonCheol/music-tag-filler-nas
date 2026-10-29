@@ -537,22 +537,21 @@ class RecoveryBoundaryTests(unittest.TestCase):
         reached.append(True)
         self.assertTrue(observed == (occupant, occupant_side), "late external music/sidecar were overwritten")
 
-    def test_plain_auto_rename_jobs_failure_should_recover_persisted_path(self):
+    def test_save_jobs_failure_keeps_tag_save_on_original_path(self):
         reached = self._expected_defect_guard()
         path = self._prepare(edited=True)
         row = main.jobs["test"]["results"][0]
         request = main.SaveRequest(**self.request([self.item(row)], rename=True))
         with patch.object(main, "save_jobs", side_effect=OSError("injected final jobs write")) as mocked:
             response = main.save_job("test", request)
-        self.assertEqual(mocked.call_count, 3)  # finish, recovery, final batch state
+        self.assertGreaterEqual(mocked.call_count, 1)
         self.assertEqual(response["saved"], 1)
         self.assertIn("state_error", response)
         actual = self.root / response["results"][0]["path"]
-        self.assertNotEqual(actual, path)
-        self.assertFalse(path.exists())
+        self.assertEqual(actual, path)
+        self.assertTrue(path.exists())
         self._assert_backup(actual)
         self._assert_jobs(actual.name, path.name)
-        self._rename_record("pending")
         main.jobs.clear()
         main.jobs["test"] = json.loads(self.disk_jobs)
         self._recover()

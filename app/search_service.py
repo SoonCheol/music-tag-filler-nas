@@ -173,7 +173,7 @@ def sound(path, config, query, duration, cancel=None, on_wait=None):
 
 
 def search(path, query, country, duration, data_root, mode="text", use_fingerprint=False,
-           previous=None, cancel=None, on_wait=None, force=False):
+           previous=None, cancel=None, on_wait=None, force=False, search_mode="integrated"):
     started = time.perf_counter()
     timing = {"network": {}, "sources": {}}
     config = configuration(data_root)
@@ -183,6 +183,9 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
     artist, title = match.split_query(query)
     found, errors = [], list(config.problems)
     used_sound = mode == "sound"
+    if search_mode not in ("integrated", "itunes", "musicbrainz", "quick"):
+        raise ValueError("지원하지 않는 검색 방식입니다")
+    musicbrainz_skipped = False
     if mode == "text":
         def guarded(source, fn):
             if cancel and cancel.is_set():
@@ -195,13 +198,35 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
                 return [], [network_error(source, exc)]
             finally:
                 timing["sources"][source] = time.perf_counter() - tick
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            calls = [pool.submit(guarded, "iTunes", lambda: search_itunes.search(query, country, on_wait=on_wait, cancel=cancel, force=force)),
-                     pool.submit(guarded, "MusicBrainz", lambda: search_mb.search(match.base_title(title), artist, query, on_wait=on_wait, cancel=cancel, force=force))]
-            for call in calls:
-                candidates, problems = call.result()
-                found.extend(candidates)
-                errors.extend(problems)
+        itunes_search = lambda: search_itunes.search(query, country, on_wait=on_wait, cancel=cancel, force=force)
+        musicbrainz_search = lambda: search_mb.search(match.base_title(title), artist, query, on_wait=on_wait, cancel=cancel, force=force)
+        if search_mode == "integrated":
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                calls = [pool.submit(guarded, "iTunes", itunes_search),
+                         pool.submit(guarded, "MusicBrainz", musicbrainz_search)]
+                for call in calls:
+                    candidates, problems = call.result()
+                    found.extend(candidates)
+                    errors.extend(problems)
+        elif search_mode == "itunes":
+            candidates, problems = guarded("iTunes", itunes_search)
+            found.extend(candidates)
+            errors.extend(problems)
+        elif search_mode == "musicbrainz":
+            candidates, problems = guarded("MusicBrainz", musicbrainz_search)
+            found.extend(candidates)
+            errors.extend(problems)
+        else:
+            candidates, problems = guarded("iTunes", itunes_search)
+            found.extend(candidates)
+            errors.extend(problems)
+            if not (cancel and cancel.is_set()):
+                if auto_pick(found, title, artist, duration) is None:
+                    candidates, problems = guarded("MusicBrainz", musicbrainz_search)
+                    found.extend(candidates)
+                    errors.extend(problems)
+                else:
+                    musicbrainz_skipped = True
     if not (cancel and cancel.is_set()) and (mode == "sound" or (not found and use_fingerprint)):
         used_sound = True
         candidates, problems = sound(path, config, query, duration, cancel, on_wait)
@@ -216,7 +241,8 @@ def search(path, query, country, duration, data_root, mode="text", use_fingerpri
     status = "cancelled" if cancel and cancel.is_set() else "partial" if ranked and errors else "matched" if ranked else "error" if errors else "not_found"
     return {"_timing": timing, "candidates": ranked, "search_errors": errors, "search_status": status,
             "query": query, "query_title": title, "query_artist": artist, "country": country,
-            "used_fingerprint": used_sound, "weak_query": match.is_generic_name(title, artist)}
+            "used_fingerprint": used_sound, "weak_query": match.is_generic_name(title, artist),
+            "search_mode": search_mode, "musicbrainz_skipped": musicbrainz_skipped}
 
 
 def prepare_image(data):

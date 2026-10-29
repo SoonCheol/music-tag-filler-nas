@@ -1,0 +1,19 @@
+# New isolated installation only. Never apply to an existing NAS/Portainer stack.
+services:
+  music-tag-filler:
+    image: music-tag-filler-nas:example
+    ports:
+      - "18000:8000"
+    volumes:
+      - type: bind
+        source: ./install-example/music
+        target: /music
+        read_only: false
+      - type: bind
+        source: ./install-example/data
+        target: /data
+    environment:
+      MUSIC_ROOT: /music
+      DATA_ROOT: /data
+      TZ: Asia/Seoul
+    restart: unless-stopped
