@@ -167,7 +167,13 @@ async function searchMaTracks(){
 }
 function showIdentifierValues(r){
   const ids=r.original?.ids||{};
-  $('artistIdInput').value=r._artistIdEdited?r._manualArtistId:(ids.mb_artist_ids||[]).join('; ');
+  const currentArtistIds=(ids.mb_artist_ids||[]).join('; ');
+  const currentAlbumArtistIds=(ids.mb_album_artist_ids||[]).join('; ');
+  $('cur_artist_id').textContent=currentArtistIds;
+  $('cur_artist_id').title=currentArtistIds;
+  $('cur_album_artist_id').textContent=currentAlbumArtistIds;
+  $('cur_album_artist_id').title=currentAlbumArtistIds;
+  $('artistIdInput').value=r._artistIdEdited?r._manualArtistId:currentArtistIds;
   $('albumArtistIdInput').value=r._albumArtistIdEdited?r._manualAlbumArtistId:(ids.mb_album_artist_ids||[]).join('; ');
   $('recordingIdDisplay').value=ids.mb_recording_id||'';
   $('itunesArtistIdDisplay').value=ids.itunes_artist_id||'';
