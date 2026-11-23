@@ -4,6 +4,8 @@ on:
     branches: [master]
     paths:
       - 'app/**'
+      - 'updater_agent/**'
+      - 'updater.compose.example.yml'
       - 'tests/**'
       - 'Dockerfile'
       - 'requirements*.txt'
@@ -12,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   image:
@@ -22,6 +25,34 @@ jobs:
           persist-credentials: false
       - name: Build image
         run: docker build -t music-tag-filler-nas:github-${{ github.sha }} .
+      - name: Validate UI and repository
+        run: |
+          node tests/test_ui_save.js
+          node tests/test_p2_ui.js
+          node tests/test_gitignore.js
+          node tests/test_repository_readiness.js
+      - name: Validate isolated audio and tag operations
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=512m \
+            --mount type=bind,source=${{ github.workspace }}/tests,target=/app/tests,readonly \
+            -w /app music-tag-filler-nas:github-${{ github.sha }} \
+            python -m unittest discover -s tests -p 'test_p*.py' -q
+      - name: Validate updater agent without network access
+        run: |
+          docker build -t nas-updater-test -f updater_agent/Dockerfile updater_agent
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=64m \
+            --mount type=bind,source=${{ github.workspace }}/updater_agent/test_service.py,target=/srv/test_service.py,readonly \
+            -w /srv nas-updater-test python -m unittest test_service -q
+      - name: Authenticate GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified immutable Docker image (NAS not touched)
+        run: |
+          docker tag music-tag-filler-nas:github-${{ github.sha }} ghcr.io/sooncheol/music-tag-filler-nas:sha-${{ github.sha }}
+          docker push ghcr.io/sooncheol/music-tag-filler-nas:sha-${{ github.sha }}
       - name: Export image (NAS not touched)
         run: |
           docker save music-tag-filler-nas:github-${{ github.sha }} | gzip > music-tag-filler-nas-image.tar.gz
