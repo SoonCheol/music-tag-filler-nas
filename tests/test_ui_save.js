@@ -297,8 +297,8 @@ function result(path) {
   context.directJob={id:'direct',results:[result('direct.mp3')]};
   const lyricMarkup=pageHtml.match(/<textarea\b[^>]*id="changeLyrics"[^>]*>/)[0];
   assert(!/\s(?:readonly|disabled)(?:\s|=|>)/i.test(lyricMarkup));
-  assert(pageHtml.includes('/static/js/lyrics.js?v=024-input2'));
-  assert(pageHtml.includes('/static/js/app.js?v=024-input2'));
+  assert(scriptPaths.includes('app/static/js/lyrics.js'));
+  assert(scriptPaths.includes('app/static/js/app.js'));
   run('adoptJob(directJob)');$('onlyEmpty').checked=false;run('updateSavePreview()');
   run("editingResult.original.revision='';saving=true;updateSavePreview()");
   assert.equal($('changeLyrics').readOnly,false);
