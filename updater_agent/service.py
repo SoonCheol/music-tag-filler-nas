@@ -81,7 +81,7 @@ def portainer(method, path, body=None):
                                     headers={"X-API-Key": key}, json=body,
                                     timeout=50 if method == "PUT" else 15)
         response.raise_for_status()
-        return response.json()
+        return response.json() if response.content else {}
     except (requests.RequestException, ValueError) as exc:
         raise RuntimeError("Portainer API 요청 실패") from exc
 
@@ -168,7 +168,8 @@ def status(cfg):
     with LOCK:
         running = bool(task and task["state"] in ("queued", "running"))
         progress = dict(task) if task and task["app_id"] == cfg["id"] else None
-    return {"app_id": cfg["id"], "current": current, "latest": "sha-" + sha[:12],
+    return {"app_id": cfg["id"], "current": current,
+            "current_label": current.rsplit(":", 1)[-1][:30], "latest": "sha-" + sha[:12],
             "latest_sha": sha, "latest_image": target,
             "available": current != target and not running,
             "ready": len(os.getenv("UPDATER_ADMIN_PASSWORD", "")) >= 16,
