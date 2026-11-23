@@ -503,8 +503,12 @@ def search_file_lyrics(job_id: str, request: LyricsSearchRequest):
         candidate = next((c for c in row.get("candidates", []) if candidate_id(c) == request.candidate_id), None)
         if candidate is None:
             raise HTTPException(404, "이 파일의 후보가 아닙니다")
+    # A candidate-specific re-search shares its verified token/cache with the
+    # candidate lyrics pane; free-text search remains a separate manual query.
+    duration = (row.get("original", {}).get("duration") or candidate.get("duration", 0)) if candidate else 0
     return lyric_response(lookup_lyrics(job_id, request.path, request.expected_revision,
-                                      request.title, request.artist, 0, candidate, request.force, manual=True))
+                                      request.title, request.artist, duration, candidate, request.force,
+                                      manual=candidate is None))
 
 
 def lookup_lyrics(job_id, path, revision, title, artist, duration, candidate=None, force=False, *, manual=False):
