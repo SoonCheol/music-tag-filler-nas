@@ -6,6 +6,19 @@
   const state=el('updateStatus'),current=el('updateCurrent'),latest=el('updateLatest');
   const check=el('updateCheck'),apply=el('updateApply');
   let known=null,pollTimer=null,busy=false;
+  // Display the version embedded into this installed Docker image, even if the Agent is offline.
+  if(typeof window!=='undefined' && window.addEventListener){
+    window.addEventListener('load',()=>{
+      fetch('/api/version',{cache:'no-store'})
+        .then(response=>{if(!response.ok)throw new Error('버전 조회 실패');return response.json();})
+        .then(value=>{
+          if(typeof value.version==='string' && /^v\d+\.\d+\.\d+$/.test(value.version)){
+            el('appVersion').textContent=value.version;
+            document.title='음악 정보 채우기 - NAS '+value.version;
+          }
+        }).catch(()=>{});
+    });
+  }
   function text(value){state.textContent=value;}
   function stop(){if(pollTimer)clearTimeout(pollTimer);pollTimer=null;}
   async function request(path,method='GET',body=null){
@@ -45,7 +58,7 @@
   check.addEventListener('click',()=>refresh());
   apply.addEventListener('click',async()=>{
     if(!known||!known.available)return;
-    if(!window.confirm('현재 '+known.current+'에서 '+known.latest+' 빌드로 업데이트할까요? 음악 작업이 진행 중이면 취소됩니다.'))return;
+    if(!window.confirm('현재 '+(known.current_label||known.current)+'에서 '+known.latest+' 버전으로 업데이트할까요? 음악 작업이 진행 중이면 취소됩니다.'))return;
     apply.disabled=true;
     try{
       await request('apply','POST',{expected_current:known.current,expected_latest:known.latest_sha});

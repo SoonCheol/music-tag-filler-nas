@@ -23,6 +23,10 @@ from .lyrics_service import lyric_response
 from .scan_service import ScanCancellation
 from .upstream import tags as original_tags, match as original_match, search_lyrics as original_lyrics
 
+APP_VERSION = os.getenv("APP_VERSION", "v2.0.0")
+if not re.fullmatch(r"v\d+\.\d+\.\d+", APP_VERSION):
+    APP_VERSION = "v2.0.0"
+
 MUSIC_ROOT = Path(os.getenv("MUSIC_ROOT", "/music"))
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data"))
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -30,9 +34,9 @@ JOBS_FILE = DATA_ROOT / "jobs.json"
 BACKUP_ROOT = DATA_ROOT / "backups"
 BACKUP_ROOT.mkdir(exist_ok=True)
 
-musicbrainzngs.set_useragent("music-tag-filler-nas", "2.0.0", "https://github.com/microhan1/music-tag-filler")
+musicbrainzngs.set_useragent("music-tag-filler-nas", APP_VERSION[1:], "https://github.com/microhan1/music-tag-filler")
 
-app = FastAPI(title="음악 정보 채우기 NAS Web", version="2.0.0")
+app = FastAPI(title="음악 정보 채우기 NAS Web", version=APP_VERSION[1:])
 
 # --- job store ---
 jobs: Dict[str, dict] = {}
@@ -1149,6 +1153,11 @@ def revert_file(path: str, request: RevertRequest):
             return outcome
         except (storage.StorageError, OSError, original_tags.UnsupportedFile) as exc:
             raise HTTPException(400, str(exc))
+
+@app.get("/api/version")
+def app_version():
+    return {"version": APP_VERSION}
+
 
 # Proxy the reusable update agent. The music app NEVER receives Portainer/GitHub tokens.
 class UpdateApplyPayload(BaseModel):

@@ -10,7 +10,7 @@ Music Tag Filler 웹의 업데이트 메뉴 → 기존 앱 서버의 안전한 �
 
 ## 사전 설정
 
-1. GitHub Actions `.github/workflows/build-image.yml`이 검증을 통과해야 GitHub Container Registry에 변경 불가능한 `ghcr.io/sooncheol/music-tag-filler-nas:sha-<40자 커밋>` 이미지를 게시한다. 실패한 빌드는 업데이트 후보가 아니다. CI는 NAS를 건드리지 않는다.
+1. GitHub Actions `.github/workflows/build-image.yml`이 검증을 통과해야 GitHub Container Registry에 `ghcr.io/sooncheol/music-tag-filler-nas:v2.0.N-sha-<40자 커밋>` 형식의 버전별 이미지를 발행한다. 기존 호환성을 위해 `:sha-<40자 커밋>` 태그도 발행한다. 실패한 빌드는 업데이트 후보가 아니다. CI는 NAS를 건드리지 않는다.
 2. Portainer에 비공개 GHCR 패키지를 받을 수 있는 **레지스트리 인증**을 별도로 설정한다. GitHub의 기존 `GITHUB_TOKEN`은 NAS에서 사용하는 토큰이 아니다. 패키지 읽기 범위의 자격증명 사용을 권장한다.
 3. 별도의 업데이트 서비스에만 Portainer API 키와 GitHub Actions 조회 전용 읽기 토큰을 제공한다. 앱이나 브라우저에 전달하지 않는다. 별도 업데이트 관리자 암호는 사용하지 않으며 기존 Authelia 로그인을 유지한다.
 4. 앱별로 고유한 길고 임의적인 인증 키를 생성한다. Agent에는 `UPDATER_APP_KEYS_JSON` 환경변수로, Music Tag Filler에는 같은 키 하나를 `NAS_UPDATER_KEY`로 제공한다. 저장소와 공개 웹페이지에는 어떤 비밀값도 입력하지 않는다.
@@ -25,7 +25,9 @@ Music Tag Filler 웹의 업데이트 메뉴 → 기존 앱 서버의 안전한 �
 
 ## 작동
 
-- **업데이트 확인:** Portainer가 현재 보관한 실제 Compose 이미지와 GitHub Actions에서 **성공한 최신 배포 빌드의 커밋 SHA**를 비교해 표시한다. 여기서 표시는 `v2.0.0` 같은 시맨틱 버전이 아니라 빌드 식별자다.
+- **업데이트 확인:** Portainer가 현재 보관한 Compose 이미지와 GitHub Actions의 성공한 최신 이미지 빌드를 비교한다. Music Tag Filler는 자동 버전 `v2.0.1`, `v2.0.2`처럼 표시하지만 실제 교체 대상은 각 버전과 40자 커밋 SHA가 함께 들어 있는 고유 GHCR 태그다. 미설정된 다른 앱은 기존 SHA 표시를 유지한다.
+- **자동 버전 규칙:** Music Tag Filler의 이전 버전은 `v2.0.0`이다. GitHub Actions 이미지 워크플로의 실행 번호 #27을 기준으로 #28부터 `v2.0.1`로 표시한다. 이미지 빌드 실행 번호가 하나 늘 때 패치 버전도 하나 증가한다. 실패한 빌드도 실행 번호는 소비하므로 표시 버전이 건너뛸 수 있지만 실패 이미지는 배포 대상이 아니다. 재실행(run attempt)은 새 번호로 취급하지 않는다.
+- **Agent 버전 설정:** NAS Agent가 읽는 `/config/apps.json`의 Music Tag Filler 항목에 `"version_prefix": "2.0"`, `"version_base_run": 27`이 있어야 한다. 예시는 `updater_agent/apps.example.json`을 참고한다. 실제 인증 키·스택 환경변수는 바꾸지 않는다.
 - **업데이트 실행:** 사용자가 업데이트 실행 버튼을 누르고 확인창에서 승인하면 설치를 요청한다. 별도의 암호 입력은 없다. 내부 앱 인증 키, 예상 이미지와 SHA가 맞지 않으면 중단한다.
 - **변경 내용:** Agent는 지정된 단일 서비스 스택에 대해서만, 현재 Compose 원문에서 해당 이미지 한 줄만 바꾼다. YAML 재파싱 후 다른 필드가 달라졌다면 거절한다. `Env`는 Portainer에 저장된 기존 값을 그대로 사용하며 `PullImage=true`, `Prune=false`를 지정한다. 변경 전 Compose와 환경값은 Agent의 `/state`에 비공개 사본으로 남긴다.
 - **작업 중 차단:** 실제 업데이트 바로 직전에 앱에서 검색/스캔·음악 저장·이름 변경 작업이 진행 중인지 검사한다. 확인 실패나 업데이트 중 다른 작업 발견 시 보수적으로 중단한다.

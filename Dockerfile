@@ -4,6 +4,10 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+ARG APP_VERSION=v2.0.0
+ENV APP_VERSION=${APP_VERSION}
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+
 # fpcalc + ffmpeg for fingerprint & cover convert
 # Debian trixie 기준: fpcalc는 libchromaprint-tools 패키지에 포함
 RUN apt-get update && apt-get install -y --no-install-recommends \

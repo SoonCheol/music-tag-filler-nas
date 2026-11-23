@@ -5,6 +5,8 @@
       "repo": "SoonCheol/music-tag-filler-nas",
       "workflow": "build-image.yml",
       "branch": "master",
+      "version_prefix": "2.0",
+      "version_base_run": 27,
       "image_repo": "ghcr.io/sooncheol/music-tag-filler-nas",
       "legacy_images": [
         "music-tag-filler-nas"

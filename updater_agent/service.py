@@ -41,6 +41,14 @@ def load_apps(path):
         legacy = entry.get("legacy_images", [])
         if not isinstance(legacy, list) or any(not isinstance(x, str) or not IMAGE.fullmatch(x) for x in legacy):
             raise ValueError("invalid legacy images")
+        # Optional versioning: per-app version sequence is based on GitHub Actions run_number.
+        prefix = entry.get("version_prefix")
+        baseline = entry.get("version_base_run")
+        if (prefix is None) != (baseline is None):
+            raise ValueError("incomplete version settings")
+        if prefix is not None and (not isinstance(prefix, str) or not re.fullmatch(r"\d+\.\d+", prefix)
+                                   or type(baseline) is not int or baseline < 0):
+            raise ValueError("invalid version settings")
         apps[entry["id"]] = entry
     return apps
 
@@ -85,7 +93,7 @@ def portainer(method, path, body=None):
         raise RuntimeError("Portainer API 요청 실패") from exc
 
 
-def latest_sha(cfg):
+def latest_build(cfg):
     key = os.getenv("GITHUB_READ_TOKEN", "")
     if not key:
         raise RuntimeError("GitHub Actions 읽기 토큰이 없습니다.")
@@ -103,7 +111,9 @@ def latest_sha(cfg):
         sha = str(run.get("head_sha", "")).lower()
         if (run.get("head_branch") == cfg["branch"] and run.get("conclusion") == "success"
                 and run.get("event") in ("push", "workflow_dispatch") and SHA.fullmatch(sha)):
-            return sha
+            run_number = run.get("run_number")
+            if type(run_number) is int and run_number > 0:
+                return sha, run_number
     raise RuntimeError("배포 가능한 성공 빌드가 없습니다.")
 
 
@@ -162,13 +172,33 @@ def safety_check(cfg):
 
 def status(cfg):
     _, _, _, current = current_stack(cfg)
-    sha = latest_sha(cfg)
-    target = cfg["image_repo"] + ":sha-" + sha
+    sha, run_number = latest_build(cfg)
+    prefix = cfg.get("version_prefix")
+    if prefix is not None:
+        patch_number = run_number - cfg["version_base_run"]
+        if patch_number <= 0:
+            raise RuntimeError("자동 버전 기준보다 빌드 번호가 낮습니다.")
+        latest_label = f"v{prefix}.{patch_number}"
+        target = cfg["image_repo"] + ":" + latest_label + "-sha-" + sha
+        tag = current.rsplit(":", 1)[-1]
+        match = re.fullmatch(r"(v\d+\.\d+\.\d+)-sha-[0-9a-f]{40}", tag)
+        if match:
+            current_label = match.group(1)
+        elif re.fullmatch(r"sha-[0-9a-f]{40}", tag):
+            # Images built before automatic versioning were all v2.0.0.
+            current_label = f"v{prefix}.0"
+        else:
+            current_label = tag[:30]
+    else:
+        # Unconfigured apps keep their existing SHA-tag behavior.
+        target = cfg["image_repo"] + ":sha-" + sha
+        current_label = current.rsplit(":", 1)[-1][:30]
+        latest_label = "sha-" + sha[:12]
     with LOCK:
         running = bool(task and task["state"] in ("queued", "running"))
         progress = dict(task) if task and task["app_id"] == cfg["id"] else None
     return {"app_id": cfg["id"], "current": current,
-            "current_label": current.rsplit(":", 1)[-1][:30], "latest": "sha-" + sha[:12],
+            "current_label": current_label, "latest": latest_label,
             "latest_sha": sha, "latest_image": target,
             "available": current != target and not running,
             "ready": True,  # Compatibility with pre-update web UI; no password needed.

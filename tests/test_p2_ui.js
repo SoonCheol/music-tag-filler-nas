@@ -83,6 +83,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(html.includes('event.stopPropagation();toggleHeaderAudio()'));
   assert.equal((html.match(/<audio /g)||[]).length,1);
   assert.ok(html.includes('NAS v2.0.0'));
+  assert.ok(html.includes('id="appVersion"'));
+  assert.ok(html.includes('현재 버전'));
   assert.equal(playback.$('headerAudio').textContent,'▶');
 
   const emptyCover=harness();

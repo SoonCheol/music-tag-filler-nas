@@ -31,6 +31,7 @@ NEW_IMAGE = "ghcr.io/sooncheol/music-tag-filler-nas:sha-" + ("a" * 40)
 CFG = {
     "id": "music-tag-filler", "repo": "SoonCheol/music-tag-filler-nas",
     "workflow": "build-image.yml", "branch": "master",
+    "version_prefix": "2.0", "version_base_run": 27,
     "image_repo": "ghcr.io/sooncheol/music-tag-filler-nas",
     "legacy_images": ["music-tag-filler-nas"],
     "stack_id": 32, "endpoint_id": 7, "stack": "music-tag-filler",
@@ -65,6 +66,36 @@ class UpdateAgentSafetyTests(unittest.TestCase):
             path.write_text(json.dumps({"apps": [bad]}), encoding="utf-8")
             with self.assertRaises(ValueError):
                 service.load_apps(path)
+
+    def test_invalid_version_configuration_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "apps.json"
+            for entry in (dict(CFG, version_base_run="27"), dict(CFG, version_prefix="bad"),
+                          {k: v for k, v in CFG.items() if k != "version_base_run"}):
+                path.write_text(json.dumps({"apps": [entry]}), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    service.load_apps(path)
+
+    def test_automatic_version_and_sha_tag_preserve_update_identity(self):
+        service.task = None
+        current_image = "ghcr.io/sooncheol/music-tag-filler-nas:sha-" + ("b" * 40)
+        with patch.object(service, "current_stack", return_value=(STACK, COMPOSE, {}, current_image)):
+            with patch.object(service, "latest_build", return_value=("a" * 40, 28)):
+                result = service.status(CFG)
+        self.assertEqual(result["current_label"], "v2.0.0")
+        self.assertEqual(result["latest"], "v2.0.1")
+        self.assertEqual(result["latest_image"], "ghcr.io/sooncheol/music-tag-filler-nas:v2.0.1-sha-" + ("a" * 40))
+        self.assertTrue(result["available"])
+        with patch.object(service, "current_stack", return_value=(STACK, COMPOSE, {}, result["latest_image"])):
+            with patch.object(service, "latest_build", return_value=("c" * 40, 29)):
+                new_build = service.status(CFG)
+        self.assertEqual(new_build["current_label"], "v2.0.1")
+        self.assertEqual(new_build["latest"], "v2.0.2")
+        with patch.object(service, "current_stack", return_value=(STACK, COMPOSE, {}, current_image)):
+            with patch.object(service, "latest_build", return_value=("a" * 40, 27)):
+                with self.assertRaises(RuntimeError):
+                    service.status(CFG)
+        service.task = None
 
     def test_missing_secret_does_not_authenticate(self):
         self.assertFalse(service.equal("", ""))

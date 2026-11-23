@@ -17,6 +17,10 @@ permissions:
   contents: read
   packages: write
 
+env:
+  VERSION_PREFIX: "2.0"
+  VERSION_BASE_RUN: "27" # Last legacy v2.0.0 build was workflow run #27
+
 jobs:
   image:
     runs-on: ubuntu-latest
@@ -24,8 +28,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Assign automatic build version
+        id: version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          patch=$((RUN_NUMBER - VERSION_BASE_RUN))
+          if [ "$patch" -lt 1 ]; then
+            echo "Invalid build version sequence" >&2
+            exit 1
+          fi
+          echo "tag=v${VERSION_PREFIX}.${patch}" >> "$GITHUB_OUTPUT"
       - name: Build image
-        run: docker build -t music-tag-filler-nas:github-${{ github.sha }} .
+        run: docker build --build-arg APP_VERSION="${{ steps.version.outputs.tag }}" -t music-tag-filler-nas:github-${{ github.sha }} .
       - name: Validate UI and repository
         run: |
           node tests/test_ui_save.js
@@ -52,6 +67,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish verified immutable Docker image (NAS not touched)
         run: |
+          docker tag music-tag-filler-nas:github-${{ github.sha }} ghcr.io/sooncheol/music-tag-filler-nas:${{ steps.version.outputs.tag }}-sha-${{ github.sha }}
+          docker push ghcr.io/sooncheol/music-tag-filler-nas:${{ steps.version.outputs.tag }}-sha-${{ github.sha }}
+          # Keep the previous SHA tag for older updater clients.
           docker tag music-tag-filler-nas:github-${{ github.sha }} ghcr.io/sooncheol/music-tag-filler-nas:sha-${{ github.sha }}
           docker push ghcr.io/sooncheol/music-tag-filler-nas:sha-${{ github.sha }}
       - name: Export image (NAS not touched)
