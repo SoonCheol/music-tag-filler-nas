@@ -183,7 +183,7 @@ function saveItem(r,allowManualMismatch=false){
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
   const plan=plannedChanges(r,allowManualMismatch);
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
-    manual_artist_ids:r._artistIdEdited?[r._manualArtistId]:null,manual_album_artist_ids:r._albumArtistIdEdited?[r._manualAlbumArtistId]:null,
+    manual_artist_ids:r._artistIdEdited?r._manualArtistId.split(';').filter(Boolean):null,manual_album_artist_ids:r._albumArtistIdEdited?r._manualAlbumArtistId.split(';').filter(Boolean):null,
     values:{...r._draft},fields:[...r._fields],include_cover:commonSaveCover&&!protectedAsset(r,'cover')&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:commonSaveCover&&!protectedAsset(r,'cover')?r._coverId||null:null,include_ids:$('includeIds').checked||r._artistIdEdited||r._albumArtistIdEdited,lyrics_id:lyricChoice(r,allowManualMismatch)?.lyrics_id||null,lyrics_text:r._lyricsEdited?plan.lyrics_text:null,approve_manual_lyrics_mismatch:false,_plan:plan};
 }
 
