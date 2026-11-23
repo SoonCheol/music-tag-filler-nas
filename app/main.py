@@ -12,6 +12,8 @@ from functools import wraps
 from collections import OrderedDict
 import io
 import inspect
+import hmac
+from pydantic import BaseModel, Field
 from .request_models import (
     ScanRequest, DeleteJobsRequest, SaveItem, SaveRequest, LyricsSearchRequest,
     RevertRequest, SearchRequest, RenameRequest, CandidateLyricsRequest, MaSearchRequest,
@@ -1147,6 +1149,84 @@ def revert_file(path: str, request: RevertRequest):
             return outcome
         except (storage.StorageError, OSError, original_tags.UnsupportedFile) as exc:
             raise HTTPException(400, str(exc))
+
+# Proxy the reusable update agent. The music app NEVER receives Portainer/GitHub tokens.
+class UpdateApplyPayload(BaseModel):
+    expected_current: str = Field(min_length=1, max_length=255)
+    expected_latest: str = Field(pattern=r"^[0-9a-f]{40}$")
+    password: str = Field(min_length=1, max_length=256)
+
+
+def updater_config():
+    endpoint = os.getenv("NAS_UPDATER_URL", "").rstrip("/")
+    app_id = os.getenv("NAS_UPDATER_APP_ID", "music-tag-filler")
+    key = os.getenv("NAS_UPDATER_KEY", "")
+    if not endpoint.startswith(("http://", "https://")) or not key or not re.fullmatch(r"[A-Za-z0-9_.-]+", app_id):
+        raise HTTPException(503, "업데이트 서비스가 연결되지 않았습니다.")
+    return endpoint, app_id, key
+
+
+def update_work_busy():
+    if get_active_job():
+        return "스캔/검색 진행 중에는 업데이트할 수 없습니다."
+    with save_tasks_lock:
+        if any(t.get("status") in ("queued", "saving") for t in save_tasks.values()):
+            return "태그 저장 중에는 업데이트할 수 없습니다."
+        if rename_service.renaming:
+            return "파일명 변경 중에는 업데이트할 수 없습니다."
+    with _activity_lock:
+        if any(rename_service.active.values()):
+            return "파일 작업 진행 중에는 업데이트할 수 없습니다."
+    return ""
+
+
+@app.get("/api/updater/safety")
+def updater_safety(request: Request):
+    _, _, key = updater_config()
+    supplied = request.headers.get("x-updater-key", "")
+    if not supplied or not hmac.compare_digest(key, supplied):
+        raise HTTPException(403, "인증되지 않은 업데이트 요청입니다.")
+    busy = update_work_busy()
+    return {"safe": not bool(busy), "reason": busy}
+
+
+def call_updater(method, action, *, payload=None, password=None):
+    endpoint, app_id, key = updater_config()
+    headers = {"X-App-Key": key}
+    if password is not None:
+        headers["X-Admin-Password"] = password
+    try:
+        response = requests.request(method, endpoint + "/v1/apps/" + app_id + action,
+                                    headers=headers, json=payload, timeout=25)
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise HTTPException(503, "업데이트 서비스 응답을 받지 못했습니다.") from exc
+    if response.status_code >= 400:
+        detail = data.get("detail") if isinstance(data, dict) else None
+        raise HTTPException(response.status_code, detail if isinstance(detail, str) else "업데이트 요청 실패")
+    if not isinstance(data, dict):
+        raise HTTPException(502, "업데이트 서비스 응답 형식이 올바르지 않습니다.")
+    return data
+
+
+@app.get("/api/updater/status")
+def updater_status():
+    return call_updater("GET", "")
+
+
+@app.post("/api/updater/apply", status_code=202)
+def updater_apply(payload: UpdateApplyPayload, request: Request):
+    # JSON + explicit custom header block cross-origin form submissions.
+    if request.headers.get("x-requested-with") != "NAS-Updater":
+        raise HTTPException(403, "허용되지 않은 업데이트 요청입니다.")
+    busy = update_work_busy()
+    if busy:
+        raise HTTPException(409, busy)
+    return call_updater("POST", "/update",
+                        payload={"expected_current": payload.expected_current,
+                                 "expected_latest": payload.expected_latest},
+                        password=payload.password)
+
 
 @app.get("/")
 def root():
