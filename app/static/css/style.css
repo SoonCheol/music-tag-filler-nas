@@ -110,7 +110,7 @@ tr.selected{background:var(--blue-light) !important}
 #fileBody .file-empty:hover{background:transparent}#fileBody .file-empty td{padding:0}
 .tag-details{display:grid;grid-template-columns:110px minmax(170px,1fr) 408px;gap:12px;align-items:start}
 .tag-details.change-tag-details{grid-template-columns:110px minmax(170px,1fr) 408px}
-.tag-fields{height:210px;min-width:0;grid-template-rows:repeat(7,minmax(0,1fr))}.tag-fields .input{min-width:0;width:100%}.tag-fields>div[id^="cur_"]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.tag-fields{height:210px;min-width:0;grid-template-rows:repeat(6,minmax(0,1fr))}.tag-fields .input{min-width:0;width:100%}.tag-fields>div[id^="cur_"]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .tag-grid.no-check{grid-template-columns:89px minmax(0,1fr)}
 .lyrics-box{height:210px;min-width:0;border:1px solid var(--line);border-radius:4px;display:flex;flex-direction:column;overflow:hidden;background:var(--card)}
 .lyrics-box-head{height:30px;flex:0 0 30px;padding:3px 6px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line2);font-size:11px}.lyrics-box-head .btn{margin-left:auto;padding:2px 5px;font-size:11px}.lyrics-check{width:14px;height:14px;margin:0;accent-color:var(--blue)}

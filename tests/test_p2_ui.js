@@ -85,6 +85,13 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(html.includes('NAS v2.0.0'));
   assert.ok(html.includes('id="appVersion"'));
   assert.ok(!html.includes('id="recordingIdDisplay"'));
+  assert.ok(!pageHtml.includes('앨범 가수 ID :'));
+  assert.match(pageHtml, /id="albumArtistIdInput" type="hidden"/);
+  assert.match(pageHtml, /id="cur_album_artist_id" hidden/);
+  assert.ok(pageHtml.includes('id="albumArtistIdSearch" type="button" hidden'));
+  assert.ok(!pageHtml.includes('MusicBrainz Album Artist ID'));
+  assert.ok(pageHtml.includes('id="artistIdInput"'));
+  assert.ok(pageHtml.includes('id="itunesArtistIdDisplay"'));
   assert.ok(html.includes('id="itunesArtistIdDisplay"'));
   assert.ok(html.includes('현재 버전'));
   assert.ok(html.includes('id="updateClose"'));
