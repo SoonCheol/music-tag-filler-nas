@@ -46,7 +46,7 @@ function adoptJob(job){
   const previous=new Map((displayedJobId===job.id?currentResults:draftJobs.get(job.id)||[]).map(r=>[r.path,r]));
   currentResults=(job.results||[]).map(r=>{const old=previous.get(r.path);if(old&&old.search_phase&&['waiting','running'].includes(old.search_phase)&&r.search_phase==='complete'&&!old._dirty&&old._selection==='none')old._draft=null;if(old)Object.keys(old).filter(k=>k.startsWith('_')&&(k==='_checked'||k==='_displayOrder'||old._draftRevision===r.original?.revision)).forEach(k=>r[k]=old[k]);return r;});
   let nextOrder=currentResults.reduce((max,r)=>Math.max(max,r._displayOrder??-1),-1)+1;currentResults.forEach(r=>{if(r._displayOrder==null)r._displayOrder=nextOrder++;});
-  if(typeof job.sub_path==='string'){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
+  if(typeof job.sub_path==='string'&&!job.ma_search){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
   $('searchMode').value=['integrated','itunes','musicbrainz','quick'].includes(job.options?.search_mode)?job.options.search_mode:'integrated';
   currentJobId=job.id;displayedJobId=job.id;lastJobSignature=jobSignature(job);editingResult=null;selectedFileIdx=-1;applyFilter();
   const index=filteredResults.findIndex(r=>r.path===selectedPath);if(index>=0)selectFile(index);persistView();
@@ -212,7 +212,7 @@ async function pollJobs(){
     if(!renameBusy)await pollPathChanges();
     const jobs=await api('/api/jobs?summary=true'); allJobs=jobs;updateBackgroundSelection();if(currentJobId!==initialSelection&&displayedJobId)return;
     renderBackgroundJobs();
-    let active=jobs.find(j=>j.id===currentJobId&&(!viewPinned||(j.sub_path||'')===$('subPath').value))||(viewPinned?jobs.find(j=>(j.sub_path||'')===$('subPath').value):jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0]);
+    let active=jobs.find(j=>j.id===currentJobId&&(!viewPinned||j.ma_search||(j.sub_path||'')===$('subPath').value))||(viewPinned?jobs.find(j=>(j.sub_path||'')===$('subPath').value):jobs.find(j=>j.status==='scanning'||j.status==='queued')||jobs[0]);
     if(active&&!active.results&&!saving&&!searching&&!renameEditor&&!renameBusy&&!actionResolver&&(displayedJobId!==active.id||lastDetailRevision!==jobViewKey(active))){const key=jobViewKey(active),expectedSelection=currentJobId;active=await api('/api/jobs/'+encodeURIComponent(active.id));if(currentJobId!==expectedSelection)return;lastDetailRevision=key;}
     if(active){currentJobId=active.id;const pct=active.total?Math.round(active.scanned/active.total*100):0;$('progBar').style.width=pct+'%';$('progressText').textContent=active.status==='done'?scanCompletionText(active):`전체 ${active.total||0}곡 / 검색 완료 ${active.scanned||0}곡 / 남은 ${Math.max(0,(active.total||0)-(active.scanned||0))}곡 (${active.status})`;if(!searching)$('statusLine').textContent=editingResult?.search_status?searchSummary(editingResult):`${active.status} — ${active.diagnostic||active.error||active.current_file||''}${active.search_wait_seconds?' / API 대기 '+active.search_wait_seconds+'초':''}`;if(['scanning','queued','cancelling'].includes(active.status)){ $('btnResume').style.display='none';}else if(active.status==='cancelled'||active.status==='interrupted'){ $('btnResume').style.display='inline-block';}else{ $('btnResume').style.display='none';}if(!saving&&!searching&&!renameEditor&&!renameBusy&&!actionResolver&&active.results&&(displayedJobId!==active.id||lastJobSignature!==jobSignature(active))){adoptJob(active);if(restoredView?.selectedPath){const idx=filteredResults.findIndex(r=>r.path===restoredView.selectedPath);if(idx>=0)selectFile(idx);}restoredView=null;persistView();}observeScanCompletion(active);mediaJobStatus=active.status;scheduleMediaPrefetch();}else if(displayedJobId||restoredView){clearFolderResults();restoredView=null;persistView();}
   }catch(e){}finally{
@@ -334,6 +334,7 @@ function selectFile(idx){
   $('cur_title').title=[r.original?.format,r.original?.bitrate?`${r.original.bitrate} kbps`:'',r.original?.sample_rate?`${r.original.sample_rate} Hz`:''].filter(Boolean).join(' / ');
   $('cur_albumartist').textContent=r.original?.albumartist||'';
   tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
+  showIdentifierValues(r);
   document.querySelectorAll('.chg-check').forEach(c=>c.checked=r._fields.includes(c.dataset.field));
   const best=r.candidates?.find(c=>c.id===r._candidateId);
   renderChangeCover(r);
