@@ -699,7 +699,7 @@ def save_one(result, item, request, lyric_context=None):
     original_values = current.tags.as_dict()
     requested_fields = [field for field in item.fields if final[storage.FIELDS[field]] != original_values[storage.FIELDS[field]]]
     ids = None
-    if item.include_ids and candidate:
+    if item.include_ids and candidate and item.manual_artist_ids is None and item.manual_album_artist_ids is None:
         model = search_service.candidate_model(candidate)
         ids = search_service.pipeline.ids_from_candidate(model)
         def matches(field, key, *expected):
