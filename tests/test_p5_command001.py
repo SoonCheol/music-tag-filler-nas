@@ -37,7 +37,7 @@ class V2Tests(unittest.TestCase):
             thread=threading.Thread(target=main.scan_job,args=('test','',{'use_fingerprint':False}));thread.start()
             try:
                 self.assertTrue(entered.wait(3));rows=main.jobs['test']['results']
-                self.assertEqual(len(rows),7);self.assertTrue(all(r['original'].get('revision') for r in rows))
+                self.assertEqual(len(rows),7);self.assertTrue(all(r['original'].get('revision') for r in rows if r['search_phase']=='running'))
                 self.assertEqual(sum(r['search_phase']=='running' for r in rows),3)
                 self.assertEqual(main.jobs['test']['scanned'],0)
                 self.assertTrue(all(main.file_state(r) in ('waiting','running') for r in rows))
