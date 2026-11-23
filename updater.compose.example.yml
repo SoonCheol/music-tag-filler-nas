@@ -16,7 +16,6 @@ services:
       PORTAINER_API_KEY: ${PORTAINER_API_KEY:?Set_Portainer_API_token}
       GITHUB_READ_TOKEN: ${GITHUB_READ_TOKEN:?Set_GitHub_Actions_read_token}
       UPDATER_APP_KEYS_JSON: ${UPDATER_APP_KEYS_JSON:?Set_per_app_keys_JSON}
-      UPDATER_ADMIN_PASSWORD: ${UPDATER_ADMIN_PASSWORD:?Set_admin_password}
       UPDATER_CONFIG: /config/apps.json
       UPDATER_STATE_DIR: /state
     volumes:

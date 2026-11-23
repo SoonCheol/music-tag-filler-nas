@@ -1154,7 +1154,6 @@ def revert_file(path: str, request: RevertRequest):
 class UpdateApplyPayload(BaseModel):
     expected_current: str = Field(min_length=1, max_length=255)
     expected_latest: str = Field(pattern=r"^[0-9a-f]{40}$")
-    password: str = Field(min_length=1, max_length=256)
 
 
 def updater_config():
@@ -1190,11 +1189,9 @@ def updater_safety(request: Request):
     return {"safe": not bool(busy), "reason": busy}
 
 
-def call_updater(method, action, *, payload=None, password=None):
+def call_updater(method, action, *, payload=None):
     endpoint, app_id, key = updater_config()
     headers = {"X-App-Key": key}
-    if password is not None:
-        headers["X-Admin-Password"] = password
     try:
         response = requests.request(method, endpoint + "/v1/apps/" + app_id + action,
                                     headers=headers, json=payload, timeout=25)
@@ -1224,8 +1221,7 @@ def updater_apply(payload: UpdateApplyPayload, request: Request):
         raise HTTPException(409, busy)
     return call_updater("POST", "/update",
                         payload={"expected_current": payload.expected_current,
-                                 "expected_latest": payload.expected_latest},
-                        password=payload.password)
+                                 "expected_latest": payload.expected_latest})
 
 
 @app.get("/")

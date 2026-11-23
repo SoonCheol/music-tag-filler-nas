@@ -24,7 +24,7 @@
     known=value;
     current.textContent=value.current_label||value.current||'알 수 없음';
     latest.textContent=value.latest||'알 수 없음';
-    apply.disabled=!value.available||!value.ready;
+    apply.disabled=!value.available;
     stop();
     if(value.task&&['queued','running'].includes(value.task.state)){
       apply.disabled=true;
@@ -32,7 +32,6 @@
       if(panel.open)pollTimer=setTimeout(()=>refresh(true),3500);
     }else if(value.task?.state==='failed')text('업데이트 실패: '+value.task.phase);
     else if(value.task?.state==='done')text('새 이미지가 적용됐습니다. 페이지를 새로고침해 확인하세요.');
-    else if(!value.ready)text('업데이트 관리자 암호 설정이 필요합니다.');
     else text(value.message||'확인 완료');
   }
   async function refresh(automatic=false){
@@ -45,13 +44,11 @@
   panel.addEventListener('toggle',()=>{if(panel.open)refresh();else stop();});
   check.addEventListener('click',()=>refresh());
   apply.addEventListener('click',async()=>{
-    if(!known||!known.available||!known.ready)return;
+    if(!known||!known.available)return;
     if(!window.confirm('현재 '+known.current+'에서 '+known.latest+' 빌드로 업데이트할까요? 음악 작업이 진행 중이면 취소됩니다.'))return;
-    const password=window.prompt('업데이트 관리자 암호 (입력한 암호는 저장하지 않습니다)');
-    if(!password)return;
     apply.disabled=true;
     try{
-      await request('apply','POST',{expected_current:known.current,expected_latest:known.latest_sha,password});
+      await request('apply','POST',{expected_current:known.current,expected_latest:known.latest_sha});
       text('업데이트 요청 접수됨. 진행 결과 확인 중…');
       stop();pollTimer=setTimeout(()=>refresh(true),2500);
     }catch(e){text('업데이트 시작 실패: '+e.message);apply.disabled=false;}

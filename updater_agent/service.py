@@ -20,7 +20,6 @@ NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*$")
 LOCK = threading.Lock()
 task = None
-failures = {}
 
 
 def load_apps(path):
@@ -172,7 +171,7 @@ def status(cfg):
             "current_label": current.rsplit(":", 1)[-1][:30], "latest": "sha-" + sha[:12],
             "latest_sha": sha, "latest_image": target,
             "available": current != target and not running,
-            "ready": len(os.getenv("UPDATER_ADMIN_PASSWORD", "")) >= 16,
+            "ready": True,  # Compatibility with pre-update web UI; no password needed.
             "task": progress,
             "message": "새 빌드가 있습니다." if current != target else "최신 빌드입니다."}
 
@@ -242,18 +241,7 @@ def get_status(app_id: str, request: Request):
 def install(app_id: str, payload: InstallRequest, request: Request):
     global task
     cfg = authorize(app_id, request)
-    password = os.getenv("UPDATER_ADMIN_PASSWORD", "")
-    if len(password) < 16:
-        raise HTTPException(503, "관리자 암호를 먼저 설정하세요.")
     with LOCK:
-        attempts = [n for n in failures.get(app_id, []) if time.monotonic() - n < 600]
-        if len(attempts) >= 5:
-            raise HTTPException(429, "암호 오류 횟수가 많습니다.")
-        if not equal(request.headers.get("x-admin-password", ""), password):
-            attempts.append(time.monotonic())
-            failures[app_id] = attempts
-            raise HTTPException(403, "관리자 암호가 일치하지 않습니다.")
-        failures[app_id] = []
         if task and task["state"] in ("queued", "running"):
             raise HTTPException(409, "이미 업데이트가 진행 중입니다.")
     try:

@@ -72,6 +72,38 @@ class UpdateAgentSafetyTests(unittest.TestCase):
         self.assertFalse(service.equal("wrong", "configured"))
         self.assertTrue(service.equal("same", "same"))
 
+    def test_install_without_admin_password_keeps_app_key_and_safety_checks(self):
+        from fastapi import HTTPException
+        from starlette.requests import Request
+        service.task = None
+        valid = Request({"type": "http", "method": "POST", "path": "/v1/apps/music-tag-filler/update",
+                         "headers": [(b"x-app-key", b"internal-secret")]})
+        invalid = Request({"type": "http", "method": "POST", "path": "/v1/apps/music-tag-filler/update",
+                           "headers": []})
+        payload = service.InstallRequest(expected_current="music-tag-filler-nas:github-1234",
+                                         expected_latest="a" * 40)
+        latest = {"available": True, "current": payload.expected_current,
+                  "latest_sha": payload.expected_latest, "latest": "sha-" + "a" * 12,
+                  "latest_image": NEW_IMAGE}
+        with patch.dict(service.APPS, {CFG["id"]: CFG}, clear=True):
+            with patch.dict(service.KEYS, {CFG["id"]: "internal-secret"}, clear=True):
+                with self.assertRaises(HTTPException) as exc:
+                    service.install(CFG["id"], payload, invalid)
+                self.assertEqual(exc.exception.status_code, 403)
+                with patch.object(service, "status", return_value=latest):
+                    with patch.object(service, "safety_check", return_value=None) as safe:
+                        with patch.object(service.threading, "Thread") as thread:
+                            accepted = service.install(CFG["id"], payload, valid)
+                            self.assertTrue(accepted["accepted"])
+                            self.assertEqual(service.task["state"], "queued")
+                            safe.assert_called_once()
+                            thread.assert_called_once()
+                            thread.return_value.start.assert_called_once()
+                with self.assertRaises(HTTPException) as busy:
+                    service.install(CFG["id"], payload, valid)
+                self.assertEqual(busy.exception.status_code, 409)
+        service.task = None
+
     def test_wrong_portainer_stack_refused(self):
         with patch.object(service, "portainer", return_value={**STACK, "EndpointId": 9}) as stub:
             with self.assertRaises(RuntimeError):
