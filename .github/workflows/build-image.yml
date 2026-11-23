@@ -1,0 +1,32 @@
+name: Build NAS Docker image (no deployment)
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'app/**'
+      - 'Dockerfile'
+      - 'requirements*.txt'
+      - '.github/workflows/build-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build -t music-tag-filler-nas:github-${{ github.sha }} .
+      - name: Export image (NAS not touched)
+        run: |
+          docker save music-tag-filler-nas:github-${{ github.sha }} | gzip > music-tag-filler-nas-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-tag-filler-nas-${{ github.sha }}
+          path: music-tag-filler-nas-image.tar.gz
+          retention-days: 3
+          if-no-files-found: error
