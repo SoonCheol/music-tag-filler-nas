@@ -177,6 +177,7 @@ function showIdentifierValues(r){
   $('albumArtistIdInput').value=r._albumArtistIdEdited?r._manualAlbumArtistId:(ids.mb_album_artist_ids||[]).join('; ');
   $('recordingIdDisplay').value=ids.mb_recording_id||'';
   $('itunesArtistIdDisplay').value=ids.itunes_artist_id||'';
+  artistLookupRequest++;
   $('artistLookupPanel').hidden=true;
 }
 function editIdentifier(kind,value){
@@ -198,30 +199,51 @@ function editIdentifier(kind,value){
 }
 $('artistIdInput').addEventListener('change',e=>editIdentifier('artist',e.target.value));
 $('albumArtistIdInput').addEventListener('change',e=>editIdentifier('albumartist',e.target.value));
-let activeIdKind='artist';
+let artistLookupRequest=0;
+function closeArtistLookup(){
+  artistLookupRequest++;
+  $('artistLookupPanel').hidden=true;
+}
 async function lookupArtist(kind){
   if(!editingResult)return alert('먼저 곡을 선택하세요');
-  activeIdKind=kind;
+  const target=editingResult,jobId=currentJobId,revision=target.original?.revision;
   const query=(kind==='artist'?$('chg_artist').value:$('chg_albumartist').value).trim();
-  if(!query)return alert('가수 이름을 입력하세요');
+  if(!query)return alert('위의 가수 이름을 먼저 입력하세요');
+  const token=++artistLookupRequest;
+  const isCurrent=()=>token===artistLookupRequest&&editingResult===target&&currentJobId===jobId&&target.original?.revision===revision;
+  const list=$('artistLookupChoices');
+  list.replaceChildren();
   $('artistLookupPanel').hidden=false;
-  $('artistLookupStatus').textContent='MusicBrainz 검색 중…';
+  $('artistLookupTitle').textContent=kind==='artist'?'가수 ID 검색':'앨범 가수 ID 검색';
+  $('artistLookupStatus').textContent='“'+query+'” 검색 중…';
   try{
     const data=await api('/api/musicbrainz/artists?query='+encodeURIComponent(query));
-    const choices=$('artistLookupChoices');choices.replaceChildren();
-    (data.artists||[]).forEach(a=>{
-      const option=document.createElement('option');option.value=a.id;
-      option.textContent=[a.name,a.disambiguation,a.country].filter(Boolean).join(' · ')+' — '+a.id;
-      choices.append(option);
+    if(!isCurrent())return;
+    const artists=(Array.isArray(data.artists)?data.artists:[]).filter(a=>/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(a.id||''));
+    if(!artists.length){$('artistLookupStatus').textContent='검색된 가수가 없습니다.';return;}
+    $('artistLookupStatus').textContent=artists.length+'명 — 원하는 가수를 클릭하면 ID가 입력됩니다.';
+    artists.forEach(a=>{
+      const button=document.createElement('button');
+      button.type='button';button.className='artist-lookup-option';button.setAttribute('role','option');
+      const name=document.createElement('strong');name.textContent=a.name||'이름 없음';
+      const detail=document.createElement('span');detail.className='artist-lookup-detail';
+      const typeLabel={Person:'개인 가수',Group:'그룹',Orchestra:'오케스트라',Choir:'합창단',Character:'가상 인물',Other:'기타'}[a.type]||a.type;
+      detail.textContent=[typeLabel,a.country,a.disambiguation,a.sort_name&&a.sort_name!==a.name?'다른 표기: '+a.sort_name:''].filter(Boolean).join(' · ')||'추가 설명 없음';
+      const id=document.createElement('small');id.textContent='MusicBrainz ID: '+a.id;
+      button.append(name,detail,id);
+      button.addEventListener('click',()=>{
+        if(!isCurrent())return;
+        const field=kind==='artist'?'artistIdInput':'albumArtistIdInput';
+        $(field).value=a.id;
+        editIdentifier(kind,a.id);
+        closeArtistLookup();
+      });
+      list.append(button);
     });
-    $('artistLookupStatus').textContent=choices.options.length+'건';
-  }catch(e){$('artistLookupStatus').textContent=e.message;}
+  }catch(e){
+    if(isCurrent())$('artistLookupStatus').textContent='검색 실패: '+e.message;
+  }
 }
 $('artistIdSearch').addEventListener('click',()=>lookupArtist('artist'));
 $('albumArtistIdSearch').addEventListener('click',()=>lookupArtist('albumartist'));
-$('artistLookupApply').addEventListener('click',()=>{
-  const value=$('artistLookupChoices').value;if(!value)return;
-  const field=activeIdKind==='artist'?'artistIdInput':'albumArtistIdInput';
-  $(field).value=value;editIdentifier(activeIdKind,value);
-  $('artistLookupPanel').hidden=true;
-});
+$('artistLookupClose').addEventListener('click',closeArtistLookup);
