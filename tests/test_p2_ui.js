@@ -91,8 +91,11 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(pageHtml.includes('id="albumArtistIdSearch" type="button" hidden'));
   assert.ok(!pageHtml.includes('MusicBrainz Album Artist ID'));
   assert.ok(pageHtml.includes('id="artistIdInput"'));
-  assert.ok(pageHtml.includes('id="itunesArtistIdDisplay"'));
-  assert.ok(html.includes('id="itunesArtistIdDisplay"'));
+  assert.ok(!pageHtml.includes('id="itunesArtistIdDisplay"'));
+  assert.ok(!pageHtml.includes('id="identifierEditor"'));
+  assert.ok(!pageHtml.includes('기타 식별자'));
+  assert.ok(pageHtml.includes('id="artistIdInput"'));
+  assert.ok(!html.includes('id="itunesArtistIdDisplay"'));
   assert.ok(html.includes('현재 버전'));
   assert.ok(html.includes('id="updateClose"'));
   const updaterUI=harness();
