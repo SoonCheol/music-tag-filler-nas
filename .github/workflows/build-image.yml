@@ -4,6 +4,7 @@ on:
     branches: [master]
     paths:
       - 'app/**'
+      - 'tests/**'
       - 'Dockerfile'
       - 'requirements*.txt'
       - '.github/workflows/build-image.yml'
