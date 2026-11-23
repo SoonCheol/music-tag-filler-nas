@@ -1,0 +1,19 @@
+{
+  "apps": [
+    {
+      "id": "music-tag-filler",
+      "repo": "SoonCheol/music-tag-filler-nas",
+      "workflow": "build-image.yml",
+      "branch": "master",
+      "image_repo": "ghcr.io/sooncheol/music-tag-filler-nas",
+      "legacy_images": [
+        "music-tag-filler-nas"
+      ],
+      "stack_id": 32,
+      "endpoint_id": 7,
+      "stack": "music-tag-filler",
+      "service": "music-tag-filler",
+      "safety_url": "http://music-tag-filler:8000/api/updater/safety"
+    }
+  ]
+}
