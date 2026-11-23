@@ -119,3 +119,16 @@ tr.selected{background:var(--blue-light) !important}
 .file-lyrics+.file-name-text{margin-left:6px}
 
 #changeLyrics{box-sizing:border-box;width:100%;resize:none;border:0;font:inherit;white-space:pre-wrap}#changeLyrics:read-only{cursor:default}
+
+/* #009: keep the original two-column editor, switching only search inputs. */
+#scanControls [hidden],#maSearchControls[hidden]{display:none!important}
+#maSearchControls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+#maSearchStatus{font-size:11px;color:var(--muted)}
+.id-editor{border:1px solid var(--line);border-radius:4px;margin-top:10px;font-size:11px}
+.id-editor>summary{padding:8px 10px;font-weight:700;background:#f6f7f8;cursor:pointer}
+.id-editor-fields{padding:9px;display:grid;grid-template-columns:118px minmax(0,1fr) 55px;gap:6px;align-items:center}
+.id-editor-fields .input{min-width:0;width:100%}
+#artistLookupPanel{padding:7px 10px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+#artistLookupPanel[hidden]{display:none}
+#artistLookupChoices{min-width:260px;max-width:95%}
+.id-editor-note{padding:0 10px 8px;color:var(--muted);margin:0}
