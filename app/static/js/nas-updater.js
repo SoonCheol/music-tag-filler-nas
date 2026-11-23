@@ -22,7 +22,7 @@
   }
   function display(value){
     known=value;
-    current.textContent=value.current||'알 수 없음';
+    current.textContent=value.current_label||value.current||'알 수 없음';
     latest.textContent=value.latest||'알 수 없음';
     apply.disabled=!value.available||!value.ready;
     stop();
