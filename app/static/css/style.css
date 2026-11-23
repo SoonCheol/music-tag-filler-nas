@@ -154,3 +154,11 @@ tr.selected{background:var(--blue-light) !important}
 .tag-id-edit{display:flex;align-items:center;gap:3px;min-width:0}
 .tag-id-edit>.input{min-width:0;flex:1 1 auto;width:0;font-size:11px;padding:3px 4px}
 .tag-id-edit>.btn{flex:0 0 24px;width:24px;height:24px;padding:0;font-size:16px;line-height:1}
+
+/* Compact update control. Actual installation always requires explicit approval. */
+.updater-panel{position:relative;font-size:12px;margin-top:5px;max-width:400px}
+.updater-panel>summary{cursor:pointer;font-weight:600;color:var(--blue)}
+.updater-content{position:absolute;z-index:30;top:100%;left:0;width:355px;max-width:calc(100vw - 28px);padding:11px;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 16px #0002;line-height:1.9;overflow-wrap:anywhere}
+.updater-content strong{font-weight:600}
+#updateStatus{color:var(--muted);margin:6px 0}
+.updater-actions{display:flex;gap:7px}
