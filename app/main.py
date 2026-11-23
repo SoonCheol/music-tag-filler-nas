@@ -14,7 +14,7 @@ import io
 import inspect
 from .request_models import (
     ScanRequest, DeleteJobsRequest, SaveItem, SaveRequest, LyricsSearchRequest,
-    RevertRequest, SearchRequest, RenameRequest, CandidateLyricsRequest,
+    RevertRequest, SearchRequest, RenameRequest, CandidateLyricsRequest, MaSearchRequest,
 )
 from . import storage, search_service, job_service, preferences, rename_service, job_store, scan_service, lyrics_service
 from .lyrics_service import lyric_response
@@ -190,6 +190,123 @@ def list_folders():
     except OSError as exc:
         raise HTTPException(500, "음악 폴더 목록을 읽을 수 없습니다") from exc
     return {"folders": sorted(folders, key=str.casefold)}
+
+
+
+# MA searches are read-only; the file is always reopened and SHA256 checked by
+# the existing save path. Never trust an MA URI as a filesystem write target.
+@app.post("/api/ma/search")
+def search_ma_library(request: MaSearchRequest):
+    from urllib.parse import unquote
+    url = os.getenv("MA_API_URL", "").rstrip("/")
+    token = os.getenv("MA_API_TOKEN", "").strip()
+    if not url or not token:
+        raise HTTPException(503, "MA_API_URL 및 MA_API_TOKEN 서버 설정이 필요합니다")
+    if not re.fullmatch(r"https?://[^/]+(?::[0-9]+)?", url):
+        raise HTTPException(503, "MA_API_URL 설정을 확인하세요")
+    try:
+        response = requests.post(url + "/api",
+            json={"message_id": uuid.uuid4().hex, "command": "music/tracks/library_items",
+                  "args": {"search": request.query, "limit": request.limit, "offset": 0}},
+            headers={"Authorization": "Bearer " + token}, timeout=20)
+        response.raise_for_status()
+        packet = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        logging.getLogger("uvicorn.error").warning("MA library lookup failed: %s", type(exc).__name__)
+        raise HTTPException(502, "MA 서버 검색 요청에 실패했습니다") from exc
+    if isinstance(packet, dict) and (packet.get("error") or packet.get("error_code")):
+        raise HTTPException(502, "MA 서버가 검색 오류를 반환했습니다")
+    tracks = packet.get("result") if isinstance(packet, dict) else packet
+    if isinstance(tracks, dict):
+        tracks = tracks.get("items") or tracks.get("tracks")
+    if not isinstance(tracks, list):
+        raise HTTPException(502, "MA 검색 결과 형식을 확인할 수 없습니다")
+
+    root = MUSIC_ROOT.resolve()
+    results = []
+    seen = set()
+    term = request.query.casefold()
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        artists = ", ".join(str(a.get("name", "")) for a in track.get("artists", []) if isinstance(a, dict))
+        album = track.get("album") or {}
+        album = album if isinstance(album, dict) else {}
+        album_artists = ", ".join(str(a.get("name", "")) for a in album.get("artists", []) if isinstance(a, dict))
+        mappings = track.get("provider_mappings") or []
+        candidates = []
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            provider = str(mapping.get("provider_domain") or mapping.get("provider_instance") or "")
+            if not provider.startswith("filesystem"):
+                continue
+            candidates.append(str(mapping.get("item_id") or ""))
+        for raw in candidates:
+            raw = unquote(raw)
+            if raw.startswith("/music/"):
+                relative = raw[len("/music/"):]
+            elif raw.startswith("/"):
+                continue
+            else:
+                relative = raw
+            try:
+                target = storage.resolve_music(root, relative)
+            except (storage.StorageError, OSError):
+                continue
+            relative = target.relative_to(root).as_posix()
+            if relative in seen:
+                continue
+            fields = {"title": str(track.get("name") or ""), "artist": artists,
+                      "albumartist": album_artists, "filename": target.name}
+            # MA's library search may match broadly. Filter field-specific queries here.
+            if request.field != "all" and term not in fields[request.field].casefold():
+                continue
+            try:
+                original = storage.describe(target)
+            except (storage.StorageError, OSError, original_tags.UnsupportedFile):
+                continue
+            artist, title = parse_filename(target)
+            seen.add(relative)
+            results.append({"path": relative, "original": original,
+                            "parsed": {"artist": original.get("artist") or artist,
+                                       "title": original.get("title") or title},
+                            "candidates": [], "search_phase": "complete",
+                            "search_status": "not_found", "scan_auto_selected": False,
+                            "file_state": "review", "ma_source": True})
+            break
+    with storage.OPERATION_LOCK:
+        job_id = uuid.uuid4().hex[:8]
+        jobs[job_id] = {"id": job_id, "status": "done", "total": len(results),
+                        "scanned": len(results), "sub_path": "",
+                        "options": {"search_mode": "integrated"},
+                        "created_at": time.time(), "finished_at": time.time(),
+                        "ma_search": True, "ma_query": request.query,
+                        "view_revision": 1, "current_file": "", "results": results,
+                        "cancel_requested": False}
+        try:
+            save_jobs(job_id)
+        except OSError as exc:
+            del jobs[job_id]
+            raise HTTPException(503, "검색 결과를 작업 목록에 저장하지 못했습니다") from exc
+        return public_job(jobs[job_id])
+
+
+@app.get("/api/musicbrainz/artists")
+def search_musicbrainz_artists(query: str):
+    if not query.strip() or len(query) > 160:
+        raise HTTPException(400, "가수 이름을 1~160자로 입력하세요")
+    try:
+        data = search_service.net.search_json(
+            "https://musicbrainz.org/ws/2/artist",
+            {"query": query.strip(), "fmt": "json", "limit": 15})
+    except Exception as exc:
+        logging.getLogger("uvicorn.error").warning("MusicBrainz artist lookup failed: %s", type(exc).__name__)
+        raise HTTPException(502, "MusicBrainz 가수 검색에 실패했습니다") from exc
+    return {"artists": [{"id": str(a.get("id") or ""), "name": str(a.get("name") or ""),
+                         "disambiguation": str(a.get("disambiguation") or ""),
+                         "country": str(a.get("country") or "")}
+                        for a in data.get("artists", []) if isinstance(a, dict) and a.get("id")]}
 
 
 @app.post("/api/scan")
@@ -596,6 +713,20 @@ def save_one(result, item, request, lyric_context=None):
             ids.mb_album_id = ""
         if not artist_matches or not matches("title", "title", model.title):
             ids.mb_recording_id = ""
+    if item.manual_artist_ids is not None or item.manual_album_artist_ids is not None:
+        if not item.include_ids or item.selection != "edit":
+            raise storage.StorageError("수동 식별자는 직접 편집으로 선택한 경우에만 저장할 수 있습니다")
+        for values in (item.manual_artist_ids, item.manual_album_artist_ids):
+            if values is not None and any(not re.fullmatch(
+                    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", v)
+                    for v in values):
+                raise storage.StorageError("MusicBrainz Artist ID는 UUID 형식이어야 합니다")
+        if ids is None:
+            ids = original_tags.Ids()
+        if item.manual_artist_ids is not None:
+            ids.mb_artist_ids = item.manual_artist_ids
+        if item.manual_album_artist_ids is not None:
+            ids.mb_album_artist_ids = item.manual_album_artist_ids
     wants_cover = bool(request.save_cover and item.include_cover and candidate and (candidate.get("cover_url") or candidate.get("album"))
                        and not (only_empty and current.cover is not None))
     uploaded = preferences.get_cover(result.get("job_id", ""), item.cover_id) if request.save_cover and item.cover_id else None
