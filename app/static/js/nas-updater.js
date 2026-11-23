@@ -4,7 +4,7 @@
   const panel=el('updaterPanel');
   if(!panel)return;
   const state=el('updateStatus'),current=el('updateCurrent'),latest=el('updateLatest');
-  const check=el('updateCheck'),apply=el('updateApply');
+  const check=el('updateCheck'),apply=el('updateApply'),close=el('updateClose');
   let known=null,pollTimer=null,busy=false;
   // Display the version embedded into this installed Docker image, even if the Agent is offline.
   if(typeof window!=='undefined' && window.addEventListener){
@@ -55,6 +55,10 @@
     finally{busy=false;check.disabled=false;}
   }
   panel.addEventListener('toggle',()=>{if(panel.open)refresh();else stop();});
+  close.addEventListener('click',()=>{panel.open=false;stop();});
+  document.addEventListener('pointerdown',event=>{
+    if(panel.open&&!panel.contains(event.target)){panel.open=false;stop();}
+  });
   check.addEventListener('click',()=>refresh());
   apply.addEventListener('click',async()=>{
     if(!known||!known.available)return;

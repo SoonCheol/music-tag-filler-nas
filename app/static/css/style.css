@@ -160,5 +160,8 @@ tr.selected{background:var(--blue-light) !important}
 .updater-panel>summary{cursor:pointer;font-weight:600;color:var(--blue)}
 .updater-content{position:absolute;z-index:30;top:100%;left:0;width:355px;max-width:calc(100vw - 28px);padding:11px;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 16px #0002;line-height:1.9;overflow-wrap:anywhere}
 .updater-content strong{font-weight:600}
+.updater-content>div:first-of-type{padding-right:32px}
+.updater-close{position:absolute;top:6px;right:7px;width:28px;height:28px;border:0;border-radius:4px;background:transparent;color:#555;font-size:23px;line-height:1;cursor:pointer}
+.updater-close:hover,.updater-close:focus-visible{background:#f0f2f5}
 #updateStatus{color:var(--muted);margin:6px 0}
 .updater-actions{display:flex;gap:7px}

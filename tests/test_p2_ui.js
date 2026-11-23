@@ -85,6 +85,17 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.ok(html.includes('NAS v2.0.0'));
   assert.ok(html.includes('id="appVersion"'));
   assert.ok(html.includes('현재 버전'));
+  assert.ok(html.includes('id="updateClose"'));
+  const updaterUI=harness();
+  const panel=updaterUI.$('updaterPanel');
+  panel.open=true;
+  updaterUI.documentEvents.pointerdown({target:panel});
+  assert.equal(panel.open,true); // Clicking within panel does not close it.
+  updaterUI.$('updateClose').listeners.click();
+  assert.equal(panel.open,false);
+  panel.open=true;
+  updaterUI.documentEvents.pointerdown({target:updaterUI.$('scanControls')});
+  assert.equal(panel.open,false); // Outside pointer closes the panel.
   assert.equal(playback.$('headerAudio').textContent,'▶');
 
   const emptyCover=harness();
