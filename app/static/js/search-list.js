@@ -346,7 +346,7 @@ function selectFile(idx){
 }
 
 function searchSummary(r){
-  const labels={matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};
+  const labels={ma_library:'MA 라이브러리 검색 완료',matched:'검색 완료',partial:'일부 출처 검색 실패',not_found:'검색 결과 없음',error:'검색 실패',cancelled:'검색 중지'};
   const errors=(r.search_errors||[]).map(e=>e.source+': '+e.message).join(' / ');
   return (labels[r.search_status]||r.search_status||'대기 중')+(r.country?' ['+r.country+']':'')+(r.musicbrainz_skipped?' — 빠른 검색에서 iTunes 결과가 충분해 MusicBrainz 생략':'')+(errors?' — '+errors:'');
 }
