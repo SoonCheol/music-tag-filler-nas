@@ -138,7 +138,7 @@ class FilenameTests(unittest.TestCase):
     def test_search_registration_spans_network_and_releases(self):
         path=self.copy();row=self.job([path])[0]
         entered=threading.Event();release=threading.Event()
-        def find(*args):
+        def find(*args, **kwargs):
             entered.set();release.wait(3)
             return main.original_lyrics.LyricsResult(main.original_lyrics.NOT_FOUND)
         request=main.LyricsSearchRequest(path=path.name,expected_revision=storage.revision(path),title='Unique test',artist='Singer')
