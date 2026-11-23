@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ln -sf /usr/bin/fpcalc /usr/local/bin/fpcalc || true
 
 WORKDIR /app
+LABEL org.opencontainers.image.source="https://github.com/SoonCheol/music-tag-filler-nas"
 COPY requirements.txt requirements.lock.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock.txt
 
