@@ -181,6 +181,11 @@ function saveItem(r,allowManualMismatch=false){
   captureCurrent();
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
+  if($('onlyEmpty').checked&&
+      ((r._artistIdEdited&&(r.original?.ids?.mb_artist_ids||[]).length)||
+       (r._albumArtistIdEdited&&(r.original?.ids?.mb_album_artist_ids||[]).length))){
+    throw new Error('기존 MusicBrainz Artist ID를 교체하려면 저장 옵션에서 빈 태그만 채우기를 해제하세요.');
+  }
   const plan=plannedChanges(r,allowManualMismatch);
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
     manual_artist_ids:r._artistIdEdited?r._manualArtistId.split(';').filter(Boolean):null,manual_album_artist_ids:r._albumArtistIdEdited?r._manualAlbumArtistId.split(';').filter(Boolean):null,
