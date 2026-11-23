@@ -196,7 +196,7 @@ let activeIdKind='artist';
 async function lookupArtist(kind){
   if(!editingResult)return alert('먼저 곡을 선택하세요');
   activeIdKind=kind;
-  const query=(kind==='artist'?$(chg_artist').value:$(chg_albumartist').value).trim();
+  const query=(kind==='artist'?$('chg_artist').value:$('chg_albumartist').value).trim();
   if(!query)return alert('가수 이름을 입력하세요');
   $('artistLookupPanel').hidden=false;
   $('artistLookupStatus').textContent='MusicBrainz 검색 중…';
