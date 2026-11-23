@@ -48,6 +48,7 @@ function adoptJob(job){
   let nextOrder=currentResults.reduce((max,r)=>Math.max(max,r._displayOrder??-1),-1)+1;currentResults.forEach(r=>{if(r._displayOrder==null)r._displayOrder=nextOrder++;});
   if(typeof job.sub_path==='string'&&!job.ma_search){$('subPath').value=job.sub_path;pendingFolder=job.sub_path;folderLabel();}
   $('searchMode').value=['integrated','itunes','musicbrainz','quick'].includes(job.options?.search_mode)?job.options.search_mode:'integrated';
+  if(typeof setSearchSource==='function')setSearchSource(job.ma_search?'ma':'folder');
   currentJobId=job.id;displayedJobId=job.id;lastJobSignature=jobSignature(job);editingResult=null;selectedFileIdx=-1;applyFilter();
   const index=filteredResults.findIndex(r=>r.path===selectedPath);if(index>=0)selectFile(index);persistView();
 }
