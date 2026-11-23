@@ -51,7 +51,7 @@ function captureCurrent(){
 
 function resetDraft(r){
   manualCoverDraft(r,null);
-  r._draft=null;r._dirty=false;r._manualFields=[];r._candidateId=null;r._coverId=null;r._lyricsSearch=null;r._lyricsEdited=false;r._lyricsDraft=null;r._lyricsEpoch=(r._lyricsEpoch||0)+1;r._candidateFeedback=null;r._appliedFields=[];r._manualLyricsStatus=null;
+  r._draft=null;r._dirty=false;r._artistIdEdited=false;r._albumArtistIdEdited=false;r._manualArtistId=undefined;r._manualAlbumArtistId=undefined;r._manualFields=[];r._candidateId=null;r._coverId=null;r._lyricsSearch=null;r._lyricsEdited=false;r._lyricsDraft=null;r._lyricsEpoch=(r._lyricsEpoch||0)+1;r._candidateFeedback=null;r._appliedFields=[];r._manualLyricsStatus=null;
   ensureDraft(r);previewPath=null;previewRevision=null;
   if(editingResult===r)tagFields.forEach(f=>$('chg_'+f).value=r._draft[f]);
 }
@@ -183,7 +183,8 @@ function saveItem(r,allowManualMismatch=false){
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
   const plan=plannedChanges(r,allowManualMismatch);
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
-    values:{...r._draft},fields:[...r._fields],include_cover:commonSaveCover&&!protectedAsset(r,'cover')&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:commonSaveCover&&!protectedAsset(r,'cover')?r._coverId||null:null,include_ids:$('includeIds').checked,lyrics_id:lyricChoice(r,allowManualMismatch)?.lyrics_id||null,lyrics_text:r._lyricsEdited?plan.lyrics_text:null,approve_manual_lyrics_mismatch:false,_plan:plan};
+    manual_artist_ids:r._artistIdEdited?[r._manualArtistId]:null,manual_album_artist_ids:r._albumArtistIdEdited?[r._manualAlbumArtistId]:null,
+    values:{...r._draft},fields:[...r._fields],include_cover:commonSaveCover&&!protectedAsset(r,'cover')&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:commonSaveCover&&!protectedAsset(r,'cover')?r._coverId||null:null,include_ids:$('includeIds').checked||r._artistIdEdited||r._albumArtistIdEdited,lyrics_id:lyricChoice(r,allowManualMismatch)?.lyrics_id||null,lyrics_text:r._lyricsEdited?plan.lyrics_text:null,approve_manual_lyrics_mismatch:false,_plan:plan};
 }
 
 let saveConfirmResolver=null;
@@ -225,7 +226,7 @@ async function submitSave(rows,scope,label){
   const paths=rows.map(r=>r.path);
   if(!paths.length)return alert('저장할 파일이 없습니다');
   let items;try{items=rows.map(r=>saveItem(r,scope==='current'));}catch(e){return alert(e.message);}
-  if($('onlyEmpty').checked&&!rows.some(r=>{const p=plannedChanges(r,scope==='current');return p.changes.length||p.cover||p.lyrics||p.synced||p.lrc;}))return alert('저장할 빈 태그 항목이 없습니다');
+  if($('onlyEmpty').checked&&!rows.some(r=>{const p=plannedChanges(r,scope==='current');return p.changes.length||p.cover||p.lyrics||p.synced||p.lrc||p.ids;}))return alert('저장할 빈 태그 항목이 없습니다');
   const jobId=currentJobId;
   const payload={scope,paths,save_cover:commonSaveCover,save_lyrics:commonSaveLyrics,checked_paths:scope==='current'?[]:[...paths],items,only_empty:$('onlyEmpty').checked,fill_lyrics:$('fillLyrics').checked,save_synced:$('saveSynced').checked,create_lrc:$('createLrc').checked,rename:false,cover_max_px:Number($('coverMax').value),artist_name_preference:$('artistPreference').value||'original'};
   const plansByPath=new Map(rows.map(r=>[r.path,plannedChanges(r,scope==='current')])),mismatches=scope==='current'?manualMismatch(rows[0]):[],title=scope==='current'?'현재곡 저장 전 확인':'선택곡 저장 전 확인',body=scope==='current'?currentSaveBody(rows[0],items[0],mismatches):selectedSaveBody(rows),accept=mismatches.length?'확인 후 저장':'저장 실행';
@@ -242,7 +243,7 @@ async function submitSave(rows,scope,label){
       if(o.lyrics_search)r._lyricsSearch={...o.lyrics_search,queryKey:lyricQueryKey(r)};
       if(o.changed&&r._lyricsSearch)r._lyricsSearch.lyrics_id=null;
       r.last_save=o;if(o.file_state)r.file_state=o.file_state;
-      if(o.changed){manualCoverDraft(r,null,jobId);r._checked=false;r._dirty=false;}
+      if(o.changed){manualCoverDraft(r,null,jobId);r._checked=false;r._dirty=false;r._artistIdEdited=false;r._albumArtistIdEdited=false;r._manualArtistId=undefined;r._manualAlbumArtistId=undefined;}
       if(o.original){r.original=o.original;r.path=o.path;if(o.changed){r._draft=null;r._candidateFeedback=null;r._appliedFields=[];r._coverId=null;if(editingResult===r)editingResult=null;}}
     });
     renderFileList();if(selectedFileIdx>=0)selectFile(selectedFileIdx);reportSave(res,scope,rows,plansByPath);
@@ -266,7 +267,7 @@ function plannedChanges(r,allowManualMismatch=false){
   const final={...base};changes.forEach(f=>final[f]=String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||''));
   const lyric=lyricPlan(r,allowManualMismatch),lyrics=lyric.change;
   const timed=!!(lyricChoice(r,allowManualMismatch)?.synced&&commonSaveLyrics&&!protectedAsset(r,'lyrics'));
-  return {changes,cover,lyrics,lyrics_text:lyric.text,synced:timed&&$('saveSynced').checked&&!r.original?.has_synced,lrc:timed&&$('createLrc').checked,rename:$('renameFiles').checked,ids:active&&!!candidate&&$('includeIds').checked};
+  return {changes,cover,lyrics,lyrics_text:lyric.text,synced:timed&&$('saveSynced').checked&&!r.original?.has_synced,lrc:timed&&$('createLrc').checked,rename:$('renameFiles').checked,ids:!!((active&&candidate&&$('includeIds').checked)||r._artistIdEdited||r._albumArtistIdEdited)};
 }
 
 function planSummary(rows){
