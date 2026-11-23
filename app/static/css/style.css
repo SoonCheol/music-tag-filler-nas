@@ -128,9 +128,17 @@ tr.selected{background:var(--blue-light) !important}
 .id-editor>summary{padding:8px 10px;font-weight:700;background:#f6f7f8;cursor:pointer}
 .id-editor-fields{padding:9px;display:grid;grid-template-columns:118px minmax(0,1fr) 55px;gap:6px;align-items:center}
 .id-editor-fields .input{min-width:0;width:100%}
-#artistLookupPanel{padding:7px 10px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+#artistLookupPanel{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:#f9fafb}
 #artistLookupPanel[hidden]{display:none}
-#artistLookupChoices{min-width:260px;max-width:95%}
+.artist-lookup-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+.artist-lookup-head .btn{margin-left:auto}
+#artistLookupStatus{color:var(--muted)}
+.artist-lookup-choices{display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto}
+.artist-lookup-option{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:4px;text-align:left;font:inherit;cursor:pointer}
+.artist-lookup-option:hover,.artist-lookup-option:focus-visible{background:var(--blue-light);border-color:var(--blue)}
+.artist-lookup-option strong{font-size:12px}
+.artist-lookup-detail{font-size:11px}
+.artist-lookup-option small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
 .id-editor-note{padding:0 10px 8px;color:var(--muted);margin:0}
 
 /* Keep the existing seven aligned tag rows while exposing artist identifiers. */
