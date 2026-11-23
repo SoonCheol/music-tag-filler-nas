@@ -21,7 +21,7 @@ function candidateValues(c){
   return $('artistPreference').value==='latin'?{...c,artist:c.artist_latin||c.artist,albumartist:c.album_artist_latin||c.albumartist}:{...c};
 }
 
-function draftSignature(r){return JSON.stringify([r._draft,r._candidateId||null,r._coverId||null,r._lyricsEdited?r._lyricsDraft:null]);}
+function draftSignature(r){return JSON.stringify([r._draft,r._candidateId||null,r._coverId||null,r._lyricsEdited?r._lyricsDraft:null,r._artistIdEdited?r._manualArtistId:null,r._albumArtistIdEdited?r._manualAlbumArtistId:null]);}
 
 function manualCoverDraft(r,coverId=undefined,jobId=currentJobId){
   // Keep only uploaded asset identifiers, scoped to the exact file revision.
