@@ -10,6 +10,18 @@
 <div class="header">
   <div>
     <h1>음악 정보 채우기 <small style="font-size:13px;font-weight:normal">v2.0.0</small></h1>
+    <details id="updaterPanel" class="updater-panel">
+      <summary>업데이트</summary>
+      <div class="updater-content">
+        <div>현재 빌드 <strong id="updateCurrent">확인 전</strong></div>
+        <div>최신 빌드 <strong id="updateLatest">확인 전</strong></div>
+        <div id="updateStatus" role="status">업데이트 메뉴를 열어 버전을 확인하세요.</div>
+        <div class="updater-actions">
+          <button type="button" id="updateCheck" class="btn">업데이트 확인</button>
+          <button type="button" id="updateApply" class="btn btn-blue" disabled>업데이트 실행</button>
+        </div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -192,5 +204,6 @@
 <script src="/static/js/tag-editor.js?v=009-ma-ids"></script>
 <script src="/static/js/options-ui.js?v=009-ma-ids"></script>
 <script src="/static/js/app.js?v=009-ma-ids"></script>
+<script src="/static/js/nas-updater.js?v=010"></script>
 </body>
 </html>
