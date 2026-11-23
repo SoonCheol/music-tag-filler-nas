@@ -1,4 +1,4 @@
-/* Portable opt-in update panel. No secrets are persisted or embedded in HTML. */
+/* Portable opt-in update panel. No secrets are persisted or embedded in HTML. Smoke-test build marker: 2026-11-24. */
 (() => {
   const el=id=>document.getElementById(id);
   const panel=el('updaterPanel');
