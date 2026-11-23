@@ -272,7 +272,7 @@ def search_ma_library(request: MaSearchRequest):
                             "parsed": {"artist": original.get("artist") or artist,
                                        "title": original.get("title") or title},
                             "candidates": [], "search_phase": "complete",
-                            "search_status": "not_found", "scan_auto_selected": False,
+                            "search_status": "ma_library", "scan_auto_selected": False,
                             "file_state": "review", "ma_source": True})
             break
     with storage.OPERATION_LOCK:
