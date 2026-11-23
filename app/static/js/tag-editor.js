@@ -12,6 +12,11 @@ function syncEditProtection(r){
   tagFields.forEach(f=>{$('chg_'+f).readOnly=!r||!r.original?.revision||protectedField(r,f);if(r&&r._draft)$('chg_'+f).value=protectedField(r,f)?originalValues(r)[f]:r._draft[f];$('chg_'+f).title=protectedField(r,f)?'빈 태그만 채우기: 기존 값 보호':'';});
   $('saveCover').disabled=protectedAsset(r,'cover');$('saveCover').checked=commonSaveCover&&!$('saveCover').disabled;
   $('saveLyrics').disabled=protectedAsset(r,'lyrics');$('saveLyrics').checked=commonSaveLyrics&&!$('saveLyrics').disabled;
+  const artistIdLocked=!r||!r.original?.revision||($('onlyEmpty').checked&&(r.original?.ids?.mb_artist_ids||[]).length>0);
+  $('saveArtistId').disabled=artistIdLocked;
+  $('saveArtistId').checked=commonSaveArtistId&&!artistIdLocked;
+  $('artistIdInput').readOnly=artistIdLocked;
+  $('artistIdSearch').disabled=artistIdLocked;
 }
 
 function originalValues(r){const o=r.original||{};return {title:o.title||'',artist:o.artist||'',album:o.album||'',albumartist:o.albumartist||'',track:o.tracknumber||'',year:o.date||'',genre:o.genre||''};}
@@ -177,19 +182,23 @@ function renderTagPreview(r){
 
 function toggleAllChange(c){commonTagFields=c?[...tagFields]:[];captureCurrent();updateSavePreview();}
 
+function artistIdChecked(r){
+  return commonSaveArtistId&&!($('onlyEmpty').checked&&(r.original?.ids?.mb_artist_ids||[]).length>0);
+}
+
 function saveItem(r,allowManualMismatch=false){
   captureCurrent();
   ensureDraft(r);
   if(!r._draftRevision)throw new Error(r.path+': 이전 작업에는 파일 검증값이 없습니다. 다시 스캔하세요.');
   if($('onlyEmpty').checked&&
-      ((r._artistIdEdited&&(r.original?.ids?.mb_artist_ids||[]).length)||
+      ((r._artistIdEdited&&artistIdChecked(r)&&(r.original?.ids?.mb_artist_ids||[]).length)||
        (r._albumArtistIdEdited&&(r.original?.ids?.mb_album_artist_ids||[]).length))){
     throw new Error('기존 MusicBrainz Artist ID를 교체하려면 저장 옵션에서 빈 태그만 채우기를 해제하세요.');
   }
   const plan=plannedChanges(r,allowManualMismatch);
   return {path:r.path,expected_revision:r._draftRevision,selection:r._selection,candidate_id:r._candidateId,
-    manual_artist_ids:r._artistIdEdited?r._manualArtistId.split(';').filter(Boolean):null,manual_album_artist_ids:r._albumArtistIdEdited?r._manualAlbumArtistId.split(';').filter(Boolean):null,
-    values:{...r._draft},fields:[...r._fields],include_cover:commonSaveCover&&!protectedAsset(r,'cover')&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:commonSaveCover&&!protectedAsset(r,'cover')?r._coverId||null:null,include_ids:$('includeIds').checked||r._artistIdEdited||r._albumArtistIdEdited,lyrics_id:lyricChoice(r,allowManualMismatch)?.lyrics_id||null,lyrics_text:r._lyricsEdited?plan.lyrics_text:null,approve_manual_lyrics_mismatch:false,_plan:plan};
+    manual_artist_ids:r._artistIdEdited&&artistIdChecked(r)?r._manualArtistId.split(';').filter(Boolean):null,manual_album_artist_ids:r._albumArtistIdEdited?r._manualAlbumArtistId.split(';').filter(Boolean):null,
+    values:{...r._draft},fields:[...r._fields],include_cover:commonSaveCover&&!protectedAsset(r,'cover')&&(!!r._coverId||(!!r._candidateId&&hasCandidateCoverSource(r))),cover_id:commonSaveCover&&!protectedAsset(r,'cover')?r._coverId||null:null,include_ids:$('includeIds').checked||(r._artistIdEdited&&artistIdChecked(r))||r._albumArtistIdEdited,save_artist_ids:artistIdChecked(r),lyrics_id:lyricChoice(r,allowManualMismatch)?.lyrics_id||null,lyrics_text:r._lyricsEdited?plan.lyrics_text:null,approve_manual_lyrics_mismatch:false,_plan:plan};
 }
 
 let saveConfirmResolver=null;
@@ -272,7 +281,7 @@ function plannedChanges(r,allowManualMismatch=false){
   const final={...base};changes.forEach(f=>final[f]=String((r._selection==='auto'?candidateValues(candidate)[f]:r._draft[f])||''));
   const lyric=lyricPlan(r,allowManualMismatch),lyrics=lyric.change;
   const timed=!!(lyricChoice(r,allowManualMismatch)?.synced&&commonSaveLyrics&&!protectedAsset(r,'lyrics'));
-  return {changes,cover,lyrics,lyrics_text:lyric.text,synced:timed&&$('saveSynced').checked&&!r.original?.has_synced,lrc:timed&&$('createLrc').checked,rename:$('renameFiles').checked,ids:!!((active&&candidate&&$('includeIds').checked)||r._artistIdEdited||r._albumArtistIdEdited)};
+  return {changes,cover,lyrics,lyrics_text:lyric.text,synced:timed&&$('saveSynced').checked&&!r.original?.has_synced,lrc:timed&&$('createLrc').checked,rename:$('renameFiles').checked,ids:!!((active&&candidate&&$('includeIds').checked)||(r._artistIdEdited&&artistIdChecked(r))||r._albumArtistIdEdited)};
 }
 
 function planSummary(rows){

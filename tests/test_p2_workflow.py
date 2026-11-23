@@ -199,6 +199,32 @@ class P2Tests(unittest.TestCase):
                 self.http({"expected_revision": storage.revision(path)}, "/api/revert/" + path.name)
                 self.assertEqual(path.read_bytes(), before)
 
+    def test_unchecked_artist_id_preserves_original_even_with_candidate_ids(self):
+        for ext in ("mp3", "flac", "m4a", "ogg"):
+            with self.subTest(ext=ext):
+                path = self.copy("artist-id-off." + ext)
+                before = p0.tags.read_file(str(path)).ids
+                result = self.job([path])[0]
+                candidate = {
+                    "source": "MusicBrainz", "title": "New Title", "artist": "New Singer",
+                    "mb_artist_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+                    "artist_sort": "New, Singer",
+                    "mbid": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                }
+                result["candidates"] = [candidate]
+                main.prepare_result(result)
+                candidate = result["candidates"][0]
+                item = self.item(result, selection="manual", candidate_id=candidate["id"],
+                                 include_ids=True, save_artist_ids=False,
+                                 values={"title": "New Title", "artist": "New Singer"},
+                                 fields=["title", "artist"])
+                self.assertEqual(self.http(self.request([item], only_empty=False))["saved"], 1)
+                actual = p0.tags.read_file(str(path)).ids
+                self.assertEqual(actual.mb_artist_ids, before.mb_artist_ids)
+                self.assertEqual(actual.artist_sort, before.artist_sort)
+                self.assertEqual(actual.itunes_artist_id, before.itunes_artist_id)
+                self.assertEqual(actual.mb_recording_id, candidate["mbid"])
+
     def test_ids_only_empty_and_manual_mismatch_protected(self):
         path = self.copy()
         extra = p0.tags.Ids(mb_artist_ids=["new"], mb_recording_id="recording")

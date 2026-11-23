@@ -9,7 +9,7 @@ const scanBrowserTimes=new Map();
 let renameEditor=null,renameBusy=false,pathChangeCursor=0;
 let editingResult=null,displayedJobId=null,saving=false,searching=false,lastJobSignature='';
 const tagFields=['title','artist','album','albumartist','track','year','genre'];
-let commonTagFields=[...tagFields],commonSaveCover=true,commonSaveLyrics=true;
+let commonTagFields=[...tagFields],commonSaveCover=true,commonSaveLyrics=true,commonSaveArtistId=true;
 
 let previewPath=null,previewRevision=null;
 const draftJobs=new Map();
@@ -96,6 +96,11 @@ const fieldLabels={title:'제목',artist:'가수',album:'앨범',albumartist:'�
 
 tagFields.forEach(f=>$('chg_'+f).addEventListener('input',()=>{if(editingResult){captureCurrent();editingResult._dirty=true;editingResult._manualFields=[...new Set([...(editingResult._manualFields||[]),f])];editingResult._selection='edit';editingResult._candidateFeedback=null;editingResult._appliedFields=[];updateSavePreview();}}));
 document.querySelectorAll('.chg-check').forEach(c=>c.addEventListener('change',()=>{if(c.disabled)return;commonTagFields=tagFields.filter(f=>f===c.dataset.field?c.checked:commonTagFields.includes(f));captureCurrent();updateSavePreview();}));
+$('saveArtistId').addEventListener('change',()=>{
+  if($('saveArtistId').disabled)return;
+  commonSaveArtistId=$('saveArtistId').checked;
+  updateSavePreview();
+});
 
 $('searchQ').title='국가 지정: @JP 가수 - 제목 (@KR/@US 등). 음향 검색: @sound 또는 @JP @sound';
 $('searchQ').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualSearch();}});

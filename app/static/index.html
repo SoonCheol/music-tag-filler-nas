@@ -78,12 +78,12 @@
               <div>가수 :</div><div id="cur_artist"></div>
               <div>앨범 :</div><div id="cur_album"></div>
               <div>앨범 가수 :</div><div id="cur_albumartist"></div>
+              <div>가수 ID :</div><div id="cur_artist_id" class="tag-id-display" title=""></div>
               <div class="tag-compact-row current-compact">
                 <span class="tag-compact-group"><span>트랙</span><span id="cur_track" class="compact-track"></span></span>
                 <span class="tag-compact-group"><span>년도</span><span id="cur_year" class="compact-year"></span></span>
                 <span class="tag-compact-group"><span>장르</span><span id="cur_genre" class="compact-genre"></span></span>
               </div>
-              <div>가수 ID :</div><div id="cur_artist_id" class="tag-id-display" title=""></div>
             </div>
             <span id="cur_album_artist_id" hidden></span>
             <section class="lyrics-box" aria-label="현재 저장된 가사"><div class="lyrics-box-head">가사</div><div id="currentLyrics" class="lyrics-body lyrics-empty" role="region" aria-label="현재 가사 내용">가사 없음</div></section>
@@ -103,12 +103,12 @@
               <label><input type="checkbox" class="chg-check" data-field="artist" checked></label><div>가수 :</div><input id="chg_artist" class="input" style="padding:3px 6px">
               <label><input type="checkbox" class="chg-check" data-field="album" checked></label><div>앨범 :</div><input id="chg_album" class="input" style="padding:3px 6px">
               <label><input type="checkbox" class="chg-check" data-field="albumartist" checked></label><div>앨범 가수 :</div><input id="chg_albumartist" class="input" style="padding:3px 6px">
+              <label><input type="checkbox" id="saveArtistId" class="id-save-check" aria-label="가수 ID 저장" checked></label><label for="artistIdInput">가수 ID :</label><div class="tag-id-edit"><input id="artistIdInput" class="input" placeholder="MusicBrainz Artist ID" aria-label="가수 MusicBrainz ID"><button id="artistIdSearch" type="button" class="btn" title="가수 ID 검색" aria-label="가수 ID 검색">⌕</button></div>
               <div class="tag-compact-row changed-compact">
                 <span class="tag-compact-group"><input type="checkbox" class="chg-check" data-field="track" checked aria-label="트랙 저장"><label for="chg_track">트랙</label><input id="chg_track" class="input compact-track"></span>
                 <span class="tag-compact-group"><input type="checkbox" class="chg-check" data-field="year" checked aria-label="년도 저장"><label for="chg_year">년도</label><input id="chg_year" class="input compact-year"></span>
                 <span class="tag-compact-group"><input type="checkbox" class="chg-check" data-field="genre" checked aria-label="장르 저장"><label for="chg_genre">장르</label><input id="chg_genre" class="input compact-genre"></span>
               </div>
-              <span></span><label for="artistIdInput">가수 ID :</label><div class="tag-id-edit"><input id="artistIdInput" class="input" placeholder="MusicBrainz Artist ID" aria-label="가수 MusicBrainz ID"><button id="artistIdSearch" type="button" class="btn" title="가수 ID 검색" aria-label="가수 ID 검색">⌕</button></div>
             </div>
             <input id="albumArtistIdInput" type="hidden"><button id="albumArtistIdSearch" type="button" hidden></button>
             <section class="lyrics-box" aria-label="입력 및 검색 가사"><div class="lyrics-box-head"><input type="checkbox" id="saveLyrics" class="lyrics-check" checked aria-label="가사 저장" title="체크된 유효한 새 가사만 저장합니다. 빈 결과는 기존 가사를 유지합니다."><span>가사</span><button type="button" id="btnSearchLyrics" class="btn" onclick="searchLyricsForCurrent()">가사 검색</button></div><select id="manualLyricsChoices" aria-label="수동 검색 가사 후보" onchange="selectManualLyrics(this.value)" hidden></select><div id="manualLyricsStatus" role="status" hidden></div><textarea id="changeLyrics" class="lyrics-body lyrics-empty" aria-label="직접 입력 및 검색 가사 내용" placeholder="가사를 직접 입력하거나 붙여넣으세요."></textarea></section>

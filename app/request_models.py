@@ -37,6 +37,7 @@ class SaveItem(BaseModel):
     include_cover: bool = False
     cover_id: Optional[str] = None
     include_ids: bool = False
+    save_artist_ids: bool = True
     manual_artist_ids: Optional[List[str]] = Field(default=None, max_length=10)
     manual_album_artist_ids: Optional[List[str]] = Field(default=None, max_length=10)
     lyrics_id: Optional[str] = None

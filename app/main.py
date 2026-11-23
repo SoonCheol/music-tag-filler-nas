@@ -721,6 +721,11 @@ def save_one(result, item, request, lyric_context=None):
         artist_matches = matches("artist", "artist", model.artist, model.artist_latin)
         if not artist_matches:
             ids.mb_artist_ids, ids.artist_sort, ids.itunes_artist_id = [], "", ""
+        if not item.save_artist_ids:
+            # Unchecked artist-ID field preserves existing IDs even when other IDs are imported.
+            ids.mb_artist_ids = list(current.ids.mb_artist_ids)
+            ids.artist_sort = current.ids.artist_sort
+            ids.itunes_artist_id = current.ids.itunes_artist_id
         if not matches("albumartist", "album_artist", model.album_artist, model.album_artist_latin):
             ids.mb_album_artist_ids, ids.album_artist_sort = [], ""
         if not matches("album", "album", model.album):
@@ -728,6 +733,8 @@ def save_one(result, item, request, lyric_context=None):
         if not artist_matches or not matches("title", "title", model.title):
             ids.mb_recording_id = ""
     if item.manual_artist_ids is not None or item.manual_album_artist_ids is not None:
+        if item.manual_artist_ids is not None and not item.save_artist_ids:
+            raise storage.StorageError("가수 ID 저장 체크가 해제되어 있습니다")
         if not item.include_ids or item.selection != "edit":
             raise storage.StorageError("수동 식별자는 직접 편집으로 선택한 경우에만 저장할 수 있습니다")
         for values in (item.manual_artist_ids, item.manual_album_artist_ids):
