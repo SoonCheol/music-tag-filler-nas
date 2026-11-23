@@ -5,12 +5,13 @@ const vm = require('node:vm');
 // Load each classic script in the same order and scope as the page.
 const pageHtml = fs.readFileSync('app/static/index.html', 'utf8');
 const scriptPaths = [...pageHtml.matchAll(/<script src="(\/static\/js\/[^" ]+)"[^>]*><\/script>/g)].map(m => 'app' + m[1].split('?')[0]);
-assert.equal(scriptPaths.length, 6);
-assert.equal(scriptPaths.at(-1), 'app/static/js/app.js');
+assert.equal(scriptPaths.length, 7);
+assert.equal(scriptPaths.at(-2), 'app/static/js/app.js');
+assert.equal(scriptPaths.at(-1), 'app/static/js/nas-updater.js');
 assert.equal(new Set(scriptPaths).size, scriptPaths.length);
 assert(!/<script[^>]+(?:async|defer|type=)/.test(pageHtml));
 // Feature scripts must load without DOM access or initialized shared state.
-scriptPaths.slice(0, -1).forEach(p => vm.runInNewContext(fs.readFileSync(p, 'utf8'), {}, {filename:p}));
+scriptPaths.slice(0, -2).forEach(p => vm.runInNewContext(fs.readFileSync(p, 'utf8'), {}, {filename:p}));
 const uiScripts = scriptPaths.map(p => ({path:p, source:fs.readFileSync(p, 'utf8')
   .replace(/^(?:loadPreferences|loadFolders|pollJobs|pollSaveTasks)\(\);/gm, '')}));
 const script = uiScripts.map(s => s.source).join('\n');
