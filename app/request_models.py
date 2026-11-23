@@ -37,6 +37,8 @@ class SaveItem(BaseModel):
     include_cover: bool = False
     cover_id: Optional[str] = None
     include_ids: bool = False
+    manual_artist_ids: Optional[List[str]] = Field(default=None, max_length=10)
+    manual_album_artist_ids: Optional[List[str]] = Field(default=None, max_length=10)
     lyrics_id: Optional[str] = None
     approve_manual_lyrics_mismatch: bool = False
     lyrics_text: Optional[str] = Field(default=None, max_length=30000)
@@ -99,3 +101,10 @@ class CandidateLyricsRequest(BaseModel):
     candidate_id: str
     expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     force: bool = False
+
+
+class MaSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=200)
+    field: Literal["all", "title", "artist", "albumartist", "filename"] = "all"
+    limit: int = Field(default=100, ge=1, le=200)
