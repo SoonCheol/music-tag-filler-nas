@@ -132,3 +132,17 @@ tr.selected{background:var(--blue-light) !important}
 #artistLookupPanel[hidden]{display:none}
 #artistLookupChoices{min-width:260px;max-width:95%}
 .id-editor-note{padding:0 10px 8px;color:var(--muted);margin:0}
+
+/* Keep the existing seven aligned tag rows while exposing artist identifiers. */
+.tag-compact-row{grid-column:1/-1;display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden}
+.tag-compact-group{display:flex;align-items:center;gap:3px;flex:0 0 auto;min-width:0;white-space:nowrap;font-size:11px}
+.tag-compact-group:last-child{flex:1 1 auto;overflow:hidden}
+.tag-compact-group .compact-track{width:34px;flex:0 0 34px}
+.tag-compact-group .compact-year{width:45px;flex:0 0 45px}
+.tag-compact-group .compact-genre{width:100%;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.changed-compact .tag-compact-group .input{box-sizing:border-box;height:24px;padding:2px 3px;font-size:11px}
+.current-compact .tag-compact-group>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag-id-display{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.tag-id-edit{display:flex;align-items:center;gap:3px;min-width:0}
+.tag-id-edit>.input{min-width:0;flex:1 1 auto;width:0;font-size:11px;padding:3px 4px}
+.tag-id-edit>.btn{flex:0 0 24px;width:24px;height:24px;padding:0;font-size:16px;line-height:1}
