@@ -15,6 +15,8 @@
 
 <div class="main">
   <div id="scanControls" class="controls">
+    <label>검색 대상 <select id="searchSource" class="input" aria-label="검색 대상"><option value="folder">폴더 검색</option><option value="ma">MA 검색</option></select></label>
+    <div id="maSearchControls" hidden><select id="maSearchField" class="input" aria-label="MA 검색 필드"><option value="all">전체 필드</option><option value="title">제목</option><option value="artist">가수</option><option value="albumartist">앨범 가수</option><option value="filename">파일명</option></select><input id="maSearchQuery" class="input" placeholder="곡명·가수·앨범 가수·파일명" maxlength="200" style="width:250px"><button id="maSearchButton" class="btn btn-blue" type="button">검색</button><span id="maSearchStatus" role="status"></span></div>
     <div id="folderPicker" style="position:relative;display:inline-flex;width:200px">
       <input id="subPath" type="hidden" value="">
       <button id="folderToggle" type="button" class="input" style="width:200px;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" aria-expanded="false" aria-controls="folderMenu">전체 ▼</button>
@@ -90,6 +92,7 @@
             </div>
             <section class="lyrics-box" aria-label="입력 및 검색 가사"><div class="lyrics-box-head"><input type="checkbox" id="saveLyrics" class="lyrics-check" checked aria-label="가사 저장" title="체크된 유효한 새 가사만 저장합니다. 빈 결과는 기존 가사를 유지합니다."><span>가사</span><button type="button" id="btnSearchLyrics" class="btn" onclick="searchLyricsForCurrent()">가사 검색</button></div><select id="manualLyricsChoices" aria-label="수동 검색 가사 후보" onchange="selectManualLyrics(this.value)" hidden></select><div id="manualLyricsStatus" role="status" hidden></div><textarea id="changeLyrics" class="lyrics-body lyrics-empty" aria-label="직접 입력 및 검색 가사 내용" placeholder="가사를 직접 입력하거나 붙여넣으세요."></textarea></section>
           </div>
+          <details id="identifierEditor" class="id-editor"><summary>식별자 편집 (MusicBrainz Artist ID · Album Artist ID)</summary><div class="id-editor-fields"><label for="artistIdInput">가수 MBID</label><input id="artistIdInput" class="input" placeholder="MusicBrainz Artist UUID"><button id="artistIdSearch" type="button" class="btn">검색</button><label for="albumArtistIdInput">앨범 가수 MBID</label><input id="albumArtistIdInput" class="input" placeholder="MusicBrainz Album Artist UUID"><button id="albumArtistIdSearch" type="button" class="btn">검색</button><label for="recordingIdDisplay">곡 MBID</label><input id="recordingIdDisplay" class="input" readonly><span></span><label for="itunesArtistIdDisplay">iTunes Artist ID</label><input id="itunesArtistIdDisplay" class="input" readonly><span></span></div><div id="artistLookupPanel" hidden><select id="artistLookupChoices" class="input" aria-label="검색된 아티스트"></select><button type="button" class="btn btn-blue" id="artistLookupApply">선택한 ID 적용</button><span id="artistLookupStatus"></span></div><p class="id-editor-note">ID는 선택한 현재 곡에만 적용되며, 저장 전 확인과 원본 백업 절차를 거칩니다.</p></details>
           <div id="candidateFeedback" class="candidate-feedback" role="status" aria-live="polite" hidden></div>
           <div id="changeSummary" hidden role="status" style="margin-top:8px;line-height:1.7;color:var(--muted)">파일을 선택하면 변경 예정 내용을 표시합니다.</div>
           <div id="saveScopeInfo" hidden style="margin-top:4px;line-height:1.7;color:var(--muted)"></div>
@@ -171,11 +174,11 @@
   <div class="dialog-actions"><button class="btn btn-blue" onclick="$('saveResultDialog').close()" autofocus>닫기</button></div>
 </dialog>
 
-<script src="/static/js/search-list.js?v=028-keyboard2"></script>
-<script src="/static/js/candidate-media.js?v=028-keyboard2"></script>
-<script src="/static/js/lyrics.js?v=028-keyboard2"></script>
-<script src="/static/js/tag-editor.js?v=028-keyboard2"></script>
-<script src="/static/js/options-ui.js?v=028-keyboard2"></script>
-<script src="/static/js/app.js?v=028-keyboard2"></script>
+<script src="/static/js/search-list.js?v=009-ma-ids"></script>
+<script src="/static/js/candidate-media.js?v=009-ma-ids"></script>
+<script src="/static/js/lyrics.js?v=009-ma-ids"></script>
+<script src="/static/js/tag-editor.js?v=009-ma-ids"></script>
+<script src="/static/js/options-ui.js?v=009-ma-ids"></script>
+<script src="/static/js/app.js?v=009-ma-ids"></script>
 </body>
 </html>
