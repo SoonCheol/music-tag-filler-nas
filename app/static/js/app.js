@@ -139,3 +139,83 @@ loadPreferences();
 loadFolders();
 pollJobs();
 pollSaveTasks();
+
+/* #009: MA library results reuse the existing persisted job, file list and editor. */
+const folderSearchNodes=[...$('scanControls').children].filter(el=>el.id!=='maSearchControls'&&!(el.contains($('searchSource'))));
+function setSearchSource(value){
+  const isMa=value==='ma';
+  folderSearchNodes.forEach(el=>el.hidden=isMa);
+  $('maSearchControls').hidden=!isMa;
+  $('searchSource').value=value;
+}
+$('searchSource').addEventListener('change',()=>setSearchSource($('searchSource').value));
+$('maSearchQuery').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();searchMaTracks();}});
+$('maSearchButton').addEventListener('click',searchMaTracks);
+async function searchMaTracks(){
+  const query=$('maSearchQuery').value.trim();
+  if(!query)return alert('검색어를 입력하세요');
+  if(saving||searching||renameBusy)return;
+  if(!await allowDraftMove())return;
+  searching=true;$('maSearchButton').disabled=true;$('maSearchStatus').textContent='MA 검색 중…';
+  try{
+    const job=await api('/api/ma/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,field:$('maSearchField').value,limit:200})});
+    viewPinned=true;currentJobId=job.id;adoptJob(job);lastDetailRevision=jobViewKey(job);
+    $('maSearchStatus').textContent=job.total+'곡 검색됨 (실제 NAS 파일)';
+    if(!job.total)$('statusLine').textContent='일치하는 NAS 음악 파일이 없습니다';
+  }catch(e){$('maSearchStatus').textContent='검색 실패';alert(e.message);}
+  finally{searching=false;$('maSearchButton').disabled=false;updateSavePreview();}
+}
+function showIdentifierValues(r){
+  const ids=r.original?.ids||{};
+  $('artistIdInput').value=r._artistIdEdited?r._manualArtistId:(ids.mb_artist_ids||[]).join('; ');
+  $('albumArtistIdInput').value=r._albumArtistIdEdited?r._manualAlbumArtistId:(ids.mb_album_artist_ids||[]).join('; ');
+  $('recordingIdDisplay').value=ids.mb_recording_id||'';
+  $('itunesArtistIdDisplay').value=ids.itunes_artist_id||'';
+  $('artistLookupPanel').hidden=true;
+}
+function editIdentifier(kind,value){
+  if(!editingResult)return;
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const list=value.trim().split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+  const original=editingResult.original?.ids||{};
+  const key=kind==='artist'?'mb_artist_ids':'mb_album_artist_ids';
+  const changed=list.join(';')!==(original[key]||[]).join(';');
+  if(changed&&(!list.length||list.length>10||list.some(x=>!uuid.test(x)))){
+    $('artistLookupStatus').textContent='UUID 형식의 ID를 입력하세요';
+    $('artistLookupPanel').hidden=false;
+    return;
+  }
+  if(kind==='artist'){editingResult._artistIdEdited=changed;editingResult._manualArtistId=list.join(';');}
+  else {editingResult._albumArtistIdEdited=changed;editingResult._manualAlbumArtistId=list.join(';');}
+  if(changed){editingResult._selection='edit';editingResult._dirty=true;$('includeIds').checked=true;}
+  updateSavePreview();
+}
+$('artistIdInput').addEventListener('change',e=>editIdentifier('artist',e.target.value));
+$('albumArtistIdInput').addEventListener('change',e=>editIdentifier('albumartist',e.target.value));
+let activeIdKind='artist';
+async function lookupArtist(kind){
+  if(!editingResult)return alert('먼저 곡을 선택하세요');
+  activeIdKind=kind;
+  const query=(kind==='artist'?$(chg_artist').value:$(chg_albumartist').value).trim();
+  if(!query)return alert('가수 이름을 입력하세요');
+  $('artistLookupPanel').hidden=false;
+  $('artistLookupStatus').textContent='MusicBrainz 검색 중…';
+  try{
+    const data=await api('/api/musicbrainz/artists?query='+encodeURIComponent(query));
+    const choices=$('artistLookupChoices');choices.replaceChildren();
+    (data.artists||[]).forEach(a=>{
+      const option=document.createElement('option');option.value=a.id;
+      option.textContent=[a.name,a.disambiguation,a.country].filter(Boolean).join(' · ')+' — '+a.id;
+      choices.append(option);
+    });
+    $('artistLookupStatus').textContent=choices.options.length+'건';
+  }catch(e){$('artistLookupStatus').textContent=e.message;}
+}
+$('artistIdSearch').addEventListener('click',()=>lookupArtist('artist'));
+$('albumArtistIdSearch').addEventListener('click',()=>lookupArtist('albumartist'));
+$('artistLookupApply').addEventListener('click',()=>{
+  const value=$('artistLookupChoices').value;if(!value)return;
+  const field=activeIdKind==='artist'?'artistIdInput':'albumArtistIdInput';
+  $(field).value=value;editIdentifier(activeIdKind,value);
+  $('artistLookupPanel').hidden=true;
+});
