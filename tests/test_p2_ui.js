@@ -84,6 +84,8 @@ function row(h,title){return h.$('folderOptions').children.find(r=>r.children.at
   assert.equal((html.match(/<audio /g)||[]).length,1);
   assert.ok(html.includes('NAS v2.0.0'));
   assert.ok(html.includes('id="appVersion"'));
+  assert.ok(!html.includes('id="recordingIdDisplay"'));
+  assert.ok(html.includes('id="itunesArtistIdDisplay"'));
   assert.ok(html.includes('현재 버전'));
   assert.ok(html.includes('id="updateClose"'));
   const updaterUI=harness();

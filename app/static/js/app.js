@@ -175,7 +175,6 @@ function showIdentifierValues(r){
   $('cur_album_artist_id').title=currentAlbumArtistIds;
   $('artistIdInput').value=r._artistIdEdited?r._manualArtistId:currentArtistIds;
   $('albumArtistIdInput').value=r._albumArtistIdEdited?r._manualAlbumArtistId:(ids.mb_album_artist_ids||[]).join('; ');
-  $('recordingIdDisplay').value=ids.mb_recording_id||'';
   $('itunesArtistIdDisplay').value=ids.itunes_artist_id||'';
   artistLookupRequest++;
   $('artistLookupPanel').hidden=true;
