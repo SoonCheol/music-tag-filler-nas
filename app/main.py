@@ -297,15 +297,19 @@ def search_musicbrainz_artists(query: str):
     if not query.strip() or len(query) > 160:
         raise HTTPException(400, "가수 이름을 1~160자로 입력하세요")
     try:
-        data = search_service.net.search_json(
+        data = search_service.net.get_json(
             "https://musicbrainz.org/ws/2/artist",
             {"query": query.strip(), "fmt": "json", "limit": 15})
+        if not isinstance(data.get("artists"), list):
+            raise ValueError("unexpected artist response")
     except Exception as exc:
         logging.getLogger("uvicorn.error").warning("MusicBrainz artist lookup failed: %s", type(exc).__name__)
         raise HTTPException(502, "MusicBrainz 가수 검색에 실패했습니다") from exc
     return {"artists": [{"id": str(a.get("id") or ""), "name": str(a.get("name") or ""),
                          "disambiguation": str(a.get("disambiguation") or ""),
-                         "country": str(a.get("country") or "")}
+                         "country": str(a.get("country") or ""),
+                         "type": str(a.get("type") or ""),
+                         "sort_name": str(a.get("sort-name") or "")}
                         for a in data.get("artists", []) if isinstance(a, dict) and a.get("id")]}
 
 
